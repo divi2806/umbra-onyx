@@ -3,7 +3,7 @@
 import { Buffer as BufferPolyfill } from "buffer";
 // Turbopack auto-injects `next/dist/compiled/buffer` (feross/buffer v5) for any
 // free `Buffer` reference in browser bundles. v5 lacks BigInt methods, which
-// breaks the Cloak SDK at `Buffer.from(bytes).readBigInt64LE(0)`. resolveAlias
+// breaks the Umbra SDK at `Buffer.from(bytes).readBigInt64LE(0)`. resolveAlias
 // doesn't override that internal injection, so we patch the missing methods
 // onto the same compiled prototype the SDK references at runtime.
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
