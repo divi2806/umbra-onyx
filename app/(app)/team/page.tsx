@@ -35,7 +35,7 @@ import {
   getShieldTokenByMint,
   isShieldTokenSupported,
   type ShieldTokenId,
-} from "@/lib/cloak/tokens";
+} from "@/lib/umbra/tokens";
 import { solanaConfig } from "@/lib/solana/config";
 import {
   addMember,
@@ -1182,7 +1182,7 @@ function Field({
 
 function mintForTokenId(id: ShieldTokenId): string {
   const t = getShieldToken(id);
-  if (t) return t.mint.toBase58();
+  if (t) return t.mint as string;
   // Token unsupported on this cluster — return a sentinel that the validator
   // will reject so the user sees the "unavailable" error explicitly.
   return "";
