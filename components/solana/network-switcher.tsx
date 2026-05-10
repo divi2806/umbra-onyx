@@ -33,7 +33,10 @@ export function NetworkSwitcher({ className }: { className?: string }) {
   function selectCluster(cluster: SwitchableSolanaCluster) {
     if (cluster === solanaConfig.cluster) return;
     setSolanaClusterOverride(cluster);
-    window.location.reload();
+
+    const nextUrl = new URL(window.location.href);
+    nextUrl.searchParams.delete("_rsc");
+    window.location.assign(nextUrl.toString());
   }
 
   return (
