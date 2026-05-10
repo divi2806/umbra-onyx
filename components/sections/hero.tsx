@@ -12,8 +12,8 @@ import {
   SolanaLogo,
 } from "@/components/logos";
 import { ConnectButton } from "@/components/solana/connect-button";
+import { NetworkSwitcher } from "@/components/solana/network-switcher";
 import { fancyButtonVariants } from "@/components/ui/fancy-button";
-import { cn } from "@/lib/utils";
 
 function TopBar() {
   return (
@@ -31,6 +31,7 @@ function TopBar() {
       </nav>
 
       <div className="flex items-center gap-2">
+        <NetworkSwitcher />
         <ConnectButton />
       </div>
     </header>
@@ -103,7 +104,7 @@ function MockTransactionCard() {
           <div className="mb-4">
             <div className="mb-1.5 flex items-center justify-between text-[11px]">
               <span className="text-muted-foreground">
-                {progress < 45 ? "Generating deposit proof…" : progress < 90 ? "Submitting to pool…" : "Finalising…"}
+                {progress < 45 ? "Generating ZK proof…" : progress < 90 ? "Submitting UTXO…" : "Finalising…"}
               </span>
               <span className="font-mono tabular-nums text-primary">
                 {Math.round(progress)}%
@@ -136,7 +137,7 @@ function MockTransactionCard() {
       <div className="absolute -right-4 -top-3 rounded-xl border border-primary/25 bg-card/80 px-3 py-1.5 shadow-lg backdrop-blur-sm">
         <div className="flex items-center gap-1.5">
           <span className="size-1.5 animate-pulse rounded-full bg-primary" />
-          <span className="text-[10.5px] font-semibold text-primary">Solana mainnet</span>
+          <span className="text-[10.5px] font-semibold text-primary">Solana mainnet/devnet</span>
         </div>
       </div>
 
@@ -145,7 +146,7 @@ function MockTransactionCard() {
         <HugeiconsIcon icon={ShieldKeyIcon} size={14} strokeWidth={1.8} className="text-primary" />
         <div>
           <p className="text-[9.5px] text-muted-foreground/70">Verified on-chain</p>
-          <p className="font-mono text-[10.5px] font-medium text-foreground">zh1eL…6qRkW</p>
+          <p className="font-mono text-[10.5px] font-medium text-foreground">UMBRAD2i…Lykh</p>
         </div>
       </div>
     </div>
@@ -153,10 +154,10 @@ function MockTransactionCard() {
 }
 
 const STATS = [
-  { value: "~3s", label: "ZK proof time" },
-  { value: "0.30%", label: "Variable fee" },
-  { value: "32", label: "Merkle height" },
-  { value: "1 sig", label: "Batch payroll" },
+  { value: "2–8s", label: "ZK proof time" },
+  { value: "~0.21%", label: "Protocol fee" },
+  { value: "20", label: "Merkle depth" },
+  { value: "1M+", label: "UTXO capacity" },
 ];
 
 export function Hero() {
@@ -253,7 +254,7 @@ export function Hero() {
           </div>
         </div>
 
-        {/* RIGHT — mock UI card */}
+        {/* RIGHT — product transaction card */}
         <div className="flex justify-center lg:justify-end">
           <MockTransactionCard />
         </div>
