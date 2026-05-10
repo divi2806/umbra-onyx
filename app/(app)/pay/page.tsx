@@ -28,9 +28,10 @@ import {
   isShieldTokenSupported,
   toBaseUnits,
   type ShieldTokenId,
-} from "@/lib/cloak/tokens";
-import { appendPayment } from "@/lib/cloak/payment-history";
-import { useFastSend } from "@/lib/cloak/use-fast-send";
+} from "@/lib/umbra/tokens";
+import { appendPayment } from "@/lib/umbra/payment-history";
+import { useUmbraSend } from "@/lib/umbra/use-umbra-send";
+import { useUmbraClientState } from "@/lib/umbra/client";
 import { solanaConfig } from "@/lib/solana/config";
 import { solscanTxUrl } from "@/lib/solana/explorer";
 import { cn } from "@/lib/utils";
@@ -118,7 +119,9 @@ export default function PayPage() {
   const [recipientTouched, setRecipientTouched] = React.useState(false);
 
   const wallet = useWallet();
-  const fastSend = useFastSend();
+  const umbraSend = useUmbraSend();
+  const umbraClientStatus = useUmbraClientState().status;
+  const clientReady = umbraClientStatus === "ready";
 
   const [lastSend, setLastSend] = React.useState<{
     amount: number;
@@ -143,27 +146,24 @@ export default function PayPage() {
   const addressValid = !addressError && recipient.trim() !== "";
   const shieldToken = React.useMemo(() => getShieldToken(token), [token]);
   const tokenSupported = isShieldTokenSupported(token);
-  const submitting =
-    fastSend.status === "deposit-proof" ||
-    fastSend.status === "deposit-submit" ||
-    fastSend.status === "withdraw-proof" ||
-    fastSend.status === "withdraw-submit";
+  const submitting = umbraSend.status === "proof" || umbraSend.status === "submit";
   const canSubmit =
     amountValid &&
     addressValid &&
     tokenSupported &&
     wallet.connected &&
+    clientReady &&
     !submitting;
 
+  // Umbra fee constants (per SDK hardcoded fee slabs):
+  // Create UTXO → ZERO_FEE_SLAB (0 protocol fee from sender).
+  // Claim UTXO  → 35 BPS protocol + 35 BPS relayer, divisor 16384.
+  const CLAIM_BPS = 70; // 35 protocol + 35 relayer
+  const BPS_DIV = 16384;
+
   const numericAmount = amountValid ? Number(amount) : 0;
-  const variableFee = numericAmount * 0.003;
-  const recipientReceives =
-    numericAmount > 0
-      ? Math.max(
-          0,
-          numericAmount - variableFee - (token === "SOL" ? 0.005 : 0),
-        )
-      : 0;
+  const claimFee = (numericAmount * CLAIM_BPS) / BPS_DIV; // deducted at recipient claim
+  const recipientReceives = numericAmount > 0 ? Math.max(0, numericAmount - claimFee) : 0;
   const recipientHint: React.ReactNode =
     numericAmount > 0 && recipientReceives > 0 ? (
       <>
@@ -193,15 +193,15 @@ export default function PayPage() {
       <div className="mx-auto grid max-w-[64rem] gap-6 pb-24 lg:grid-cols-[1.2fr_1fr] lg:items-start relative z-10">
         {/* Main column */}
         <div className="relative flex flex-col overflow-hidden rounded-[2rem] border border-white/[0.08] bg-gradient-to-br from-white/[0.04] to-transparent p-8 shadow-2xl backdrop-blur-2xl">
-        {fastSend.status === "success" && lastSend ? (
+        {umbraSend.status === "success" && lastSend ? (
           <SuccessCard
             net={lastSend.net}
             token={lastSend.token}
             recipient={lastSend.recipient}
-            depositSignature={fastSend.depositSignature}
-            withdrawSignature={fastSend.withdrawSignature}
+            createProofAccountSignature={umbraSend.createProofAccountSignature}
+            createUtxoSignature={umbraSend.createUtxoSignature}
             onSendAnother={() => {
-              fastSend.reset();
+              umbraSend.reset();
               setLastSend(null);
               setAmount("");
               setRecipient("");
@@ -234,24 +234,24 @@ export default function PayPage() {
                 shieldToken.decimals,
               );
               const recipientPubkey = new PublicKey(recipient.trim());
-              const result = await fastSend.send({
+              const result = await umbraSend.send({
                 amountBaseUnits,
-                mint: shieldToken.mint,
-                recipient: recipientPubkey,
+                mintAddress: shieldToken.mint as string,
+                recipientAddress: recipientPubkey.toBase58(),
               });
               if (wallet.publicKey) {
                 appendPayment(wallet.publicKey.toBase58(), solanaConfig.cluster, {
-                  id: result.depositSignature,
+                  id: result.createUtxoSignature,
                   cluster: solanaConfig.cluster,
                   sender: wallet.publicKey.toBase58(),
                   recipient: recipientPubkey.toBase58(),
                   token,
-                  mint: shieldToken.mint.toBase58(),
+                  mint: shieldToken.mint as string,
                   decimals: shieldToken.decimals,
                   amountRaw: amountBaseUnits.toString(),
-                  netRaw: netBaseUnits(amountBaseUnits, token === "SOL").toString(),
-                  depositSignature: result.depositSignature,
-                  withdrawSignature: result.withdrawSignature,
+                  netRaw: netBaseUnits(amountBaseUnits).toString(),
+                  depositSignature: result.createProofAccountSignature,
+                  withdrawSignature: result.createUtxoSignature,
                   timestamp: Date.now(),
                   source: "pay",
                 });
@@ -397,7 +397,7 @@ export default function PayPage() {
               disabled={!canSubmit}
               className="h-14 rounded-2xl text-[15px] shadow-[0_0_20px_rgba(var(--primary-rgb),0.3)] hover:shadow-[0_0_30px_rgba(var(--primary-rgb),0.5)] transition-shadow"
             >
-              {submitButtonLabel(fastSend.status, wallet.connected)}
+              {submitButtonLabel(umbraSend.status, wallet.connected, clientReady)}
               <HugeiconsIcon
                 icon={ArrowRight01Icon}
                 size={16}
@@ -413,13 +413,13 @@ export default function PayPage() {
 
             <TransactionProgress
               show={submitting}
-              percent={fastSend.uiPercent}
-              message={fastSend.progress ?? phaseLabel(fastSend.status)}
+              percent={umbraSend.uiPercent}
+              message={umbraSend.progress ?? phaseLabel(umbraSend.status)}
             />
 
-            {fastSend.status === "error" && fastSend.error && (
+            {umbraSend.status === "error" && umbraSend.error && (
               <p className="text-[12px] text-destructive">
-                {fastSend.error.message}
+                {umbraSend.error.message}
               </p>
             )}
           </div>
@@ -447,14 +447,22 @@ export default function PayPage() {
                 </dd>
               </div>
               <div className="flex items-center justify-between">
-                <dt className="text-white/50 font-medium">Variable fee <span className="text-[11px] opacity-40">0.30%</span></dt>
+                <dt className="text-white/50 font-medium">
+                  Sender fee <span className="text-[11px] opacity-40">protocol</span>
+                </dt>
+                <dd className="font-mono text-white/60">None</dd>
+              </div>
+              <div className="flex items-center justify-between">
+                <dt className="text-white/50 font-medium">
+                  Claim fees <span className="text-[11px] opacity-40">~0.43%</span>
+                </dt>
                 <dd className="font-mono text-white/60">
-                  {numericAmount > 0 ? `${formatAmount(variableFee)} ${token}` : "—"}
+                  {numericAmount > 0 ? `${formatAmount(claimFee)} ${token}` : "—"}
                 </dd>
               </div>
               <div className="flex items-center justify-between">
                 <dt className="text-white/50 font-medium">Network fee</dt>
-                <dd className="font-mono text-white/60">0.005 SOL</dd>
+                <dd className="font-mono text-white/60">~0.001 SOL</dd>
               </div>
               <div className="h-px bg-white/[0.06] my-1" />
               <div className="flex items-center justify-between">
@@ -464,9 +472,9 @@ export default function PayPage() {
                 </dd>
               </div>
             </dl>
-            {token !== "SOL" && numericAmount > 0 && (
+            {numericAmount > 0 && (
               <p className="mt-4 text-[11px] text-white/30 font-medium">
-                Network fee paid from your SOL balance.
+                Claim fees (35 BPS protocol + 35 BPS relayer) deducted when recipient claims. Network fee paid from your SOL balance.
               </p>
             )}
           </div>
@@ -542,15 +550,15 @@ function SuccessCard({
   net,
   token,
   recipient,
-  depositSignature,
-  withdrawSignature,
+  createProofAccountSignature,
+  createUtxoSignature,
   onSendAnother,
 }: {
   net: number;
   token: TokenId;
   recipient: string;
-  depositSignature: string | null;
-  withdrawSignature: string | null;
+  createProofAccountSignature: string | null;
+  createUtxoSignature: string | null;
   onSendAnother: () => void;
 }) {
   return (
@@ -587,8 +595,7 @@ function SuccessCard({
             <span className="font-medium text-yellow-600 dark:text-yellow-400">
               {formatAmount(net)} {token}
             </span>
-            . The chain shows the payment from the Cloak shield-pool, not your
-            wallet.
+            . A shielded UTXO was created — the recipient can scan and claim it.
           </p>
           <p className="mt-1 font-mono text-[11.5px] text-muted-foreground">
             to {shortAddress(recipient)}
@@ -598,14 +605,14 @@ function SuccessCard({
 
       <div className="flex flex-col divide-y divide-border overflow-hidden rounded-xl border border-border bg-background/40">
         <SuccessTxRow
-          label="Shield tx"
-          hint="Your deposit into the pool"
-          signature={depositSignature}
+          label="Proof tx"
+          hint="ZK proof account created on-chain"
+          signature={createProofAccountSignature}
         />
         <SuccessTxRow
-          label="Payout tx"
-          hint="What the recipient sees"
-          signature={withdrawSignature}
+          label="UTXO tx"
+          hint="Shielded UTXO in the mixer tree"
+          signature={createUtxoSignature}
         />
       </div>
 
@@ -658,10 +665,10 @@ function SuccessTxRow({
   );
 }
 
-function netBaseUnits(amount: bigint, tokenIsSol: boolean): bigint {
-  const variable = (amount * 3n) / 1000n;
-  const fixed = tokenIsSol ? 5_000_000n : 0n;
-  const net = amount - variable - fixed;
+function netBaseUnits(amount: bigint): bigint {
+  // Umbra claim fees: 35 BPS protocol + 35 BPS relayer, BPS_DIVISOR = 16384
+  const claimFee = (amount * 70n) / 16384n;
+  const net = amount - claimFee;
   return net < 0n ? 0n : net;
 }
 
@@ -673,45 +680,6 @@ function shortSig(sig: string): string {
 function shortAddress(addr: string): string {
   if (addr.length <= 12) return addr;
   return `${addr.slice(0, 6)}…${addr.slice(-6)}`;
-}
-
-function Row({
-  label,
-  value,
-  hint,
-  emphasis,
-  accent,
-}: {
-  label: string;
-  value: string;
-  hint?: string;
-  emphasis?: boolean;
-  accent?: boolean;
-}) {
-  return (
-    <div className="flex items-center justify-between py-2.5">
-      <dt className="flex items-center gap-2 text-muted-foreground">
-        <span>{label}</span>
-        {hint && (
-          <span className="font-mono text-[11px] text-muted-foreground/70">
-            {hint}
-          </span>
-        )}
-      </dt>
-      <dd
-        className={cn(
-          "font-mono",
-          accent
-            ? "font-medium text-yellow-600 dark:text-yellow-400"
-            : emphasis
-              ? "text-foreground"
-              : "text-foreground/80",
-        )}
-      >
-        {value}
-      </dd>
-    </div>
-  );
 }
 
 function formatAmount(n: number) {
@@ -764,19 +732,17 @@ function TransactionProgress({
 }
 
 function submitButtonLabel(
-  status: ReturnType<typeof useFastSend>["status"],
+  status: ReturnType<typeof useUmbraSend>["status"],
   connected: boolean,
+  clientReady: boolean,
 ): string {
   if (!connected) return "Connect wallet to send";
+  if (!clientReady) return "Registering with Umbra…";
   switch (status) {
-    case "deposit-proof":
-      return "Generating proof (1/2)…";
-    case "deposit-submit":
-      return "Shielding…";
-    case "withdraw-proof":
-      return "Generating proof (2/2)…";
-    case "withdraw-submit":
-      return "Paying recipient…";
+    case "proof":
+      return "Generating ZK proof…";
+    case "submit":
+      return "Submitting transaction…";
     case "success":
       return "Send another";
     default:
@@ -784,16 +750,12 @@ function submitButtonLabel(
   }
 }
 
-function phaseLabel(status: ReturnType<typeof useFastSend>["status"]): string {
+function phaseLabel(status: ReturnType<typeof useUmbraSend>["status"]): string {
   switch (status) {
-    case "deposit-proof":
-      return "Generating deposit proof";
-    case "deposit-submit":
-      return "Shielding into pool";
-    case "withdraw-proof":
-      return "Generating withdraw proof";
-    case "withdraw-submit":
-      return "Paying recipient";
+    case "proof":
+      return "Generating ZK proof";
+    case "submit":
+      return "Submitting to chain";
     default:
       return "Working";
   }
