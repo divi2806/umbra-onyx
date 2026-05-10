@@ -48,7 +48,7 @@ function HowItWorks() {
       n: "04",
       title: "Disclose selectively",
       icon: Key01Icon,
-      body: "Issue a scoped viewing key to your auditor for a specific date range. They get a structured report. The public ledger sees nothing.",
+      body: "Issue an audit access key to your auditor for a specific date range. They get a structured report. The public ledger sees nothing.",
     },
   ];
 
@@ -68,7 +68,7 @@ function HowItWorks() {
 
       {/* Grid of bento cards */}
       <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-        {steps.map((s, i) => (
+        {steps.map((s) => (
           <div
             key={s.n}
             className="group relative flex h-full flex-col overflow-hidden rounded-[1.5rem] border border-white/[0.08] bg-gradient-to-br from-white/[0.03] to-transparent p-6 shadow-xl backdrop-blur-lg transition-all duration-500 hover:-translate-y-2 hover:shadow-2xl hover:shadow-primary/5"
@@ -123,7 +123,7 @@ function FinalCta() {
     "Private by default, auditable on demand",
     "No new wallet or infrastructure required",
     "SOL, USDC, and USDT supported",
-    "Scoped viewing keys for auditors",
+    "Scoped audit keys for auditors",
     "ZK proofs generated in your browser",
   ];
 
@@ -141,7 +141,7 @@ function FinalCta() {
               Stop running payroll on a public database.
             </h2>
             <p className="mt-4 max-w-md text-[14.5px] leading-7 text-muted-foreground">
-              Onyx is live on Solana mainnet. Connect your treasury wallet and run your first private disbursement in under two minutes.
+              Onyx supports Solana mainnet and devnet. Pick a network, connect your treasury wallet, and run your first private disbursement in under two minutes.
             </p>
             <div className="mt-8 flex items-center gap-3">
               <Link
@@ -153,7 +153,7 @@ function FinalCta() {
               </Link>
             </div>
             <p className="mt-4 font-mono text-[11.5px] text-muted-foreground/60">
-              zh1eLd6r…6qRkW · mainnet · audited Q1 2026
+              UMBRAD2i…Lykh mainnet · DSuKky…EpAJ devnet
             </p>
           </div>
 
