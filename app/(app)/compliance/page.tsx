@@ -19,22 +19,50 @@ import * as React from "react";
 import { FancyButton } from "@/components/ui/fancy-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { cloakConfig } from "@/lib/cloak/config";
-import { deriveNk, registerNkWithRelay } from "@/lib/cloak/derive-nk";
-import { createMemoizedSignMessage } from "@/lib/cloak/sign-message-cache";
-import { useViewingKeys } from "@/lib/cloak/use-viewing-keys";
+import { deriveMvk } from "@/lib/umbra/derive-mvk";
+import { useUmbraClient, useUmbraClientState } from "@/lib/umbra/client";
+import { useViewingKeys } from "@/lib/umbra/use-viewing-keys";
 import {
   addViewingKey,
   encodeViewingKeyToken,
   revokeViewingKey,
-} from "@/lib/cloak/viewing-keys";
+  type ViewingKey,
+} from "@/lib/umbra/viewing-keys";
+import { loadScan } from "@/lib/umbra/scanned-history";
+import type { ReceivedUtxo } from "@/lib/umbra/scanned-history";
 import { solanaConfig } from "@/lib/solana/config";
 import { cn } from "@/lib/utils";
 
-type GenerateState = "idle" | "signing" | "registering" | "done" | "error";
+type GenerateState = "idle" | "deriving" | "done" | "error";
+
+function formatUtxoCsv(utxos: ReceivedUtxo[]): string {
+  const header = ["Date", "Amount", "Decimals", "Symbol", "Mint", "Tree", "InsertionIndex", "Destination"].join(",");
+  const rows = utxos.map((u) => {
+    const date = new Date(u.timestamp).toISOString();
+    return [date, u.amount, u.decimals, u.symbol, u.mint, u.treeIndex, u.insertionIndex, u.destinationAddress].join(",");
+  });
+  return [header, ...rows].join("\n");
+}
+
+function scopedReceivedUtxos(
+  wallet: string,
+  keyDateFrom: string,
+  keyDateTo: string,
+): ReceivedUtxo[] {
+  const afterTimestamp = new Date(keyDateFrom).getTime();
+  const beforeTimestamp = new Date(keyDateTo).getTime() + 86_400_000 - 1;
+
+  const stored = loadScan(wallet, solanaConfig.cluster);
+  return (stored?.report.utxos ?? []).filter(
+    (u) => u.timestamp >= afterTimestamp && u.timestamp <= beforeTimestamp,
+  );
+}
 
 export default function CompliancePage() {
-  const { publicKey, signMessage } = useWallet();
+  const { publicKey } = useWallet();
+  const client = useUmbraClient();
+  const umbraStatus = useUmbraClientState().status;
+  const isRegistering = umbraStatus === "connecting" || umbraStatus === "registering";
   const viewingKeys = useViewingKeys();
 
   const [auditor, setAuditor] = React.useState("");
@@ -43,76 +71,48 @@ export default function CompliancePage() {
   const [state, setState] = React.useState<GenerateState>("idle");
   const [lastToken, setLastToken] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
-  const [regWarning, setRegWarning] = React.useState<string | null>(null);
   const [copied, setCopied] = React.useState<string | null>(null);
   const [exporting, setExporting] = React.useState<string | null>(null);
 
-  // Memoised sign fn: avoids re-prompting for the same wallet in a session.
-  const signCacheRef = React.useRef<{
-    fn: ((msg: Uint8Array) => Promise<Uint8Array>) | null;
-    key: string;
-  }>({ fn: null, key: "" });
-
-  // Cached NK for this wallet session (same wallet = same NK every time).
-  const nkCacheRef = React.useRef<{
-    nsk: Uint8Array;
-    nkHex: string;
+  // Cached MVK for this wallet session (same wallet = same MVK every time).
+  const mvkCacheRef = React.useRef<{
+    mvkHex: string;
     key: string;
   } | null>(null);
 
-  function getMemoizedSign() {
+  async function getOrDeriveMvk() {
+    if (!client) throw new Error("Umbra client not ready — connect your wallet.");
     const walletKey = publicKey!.toBase58();
-    if (signCacheRef.current.key !== walletKey || !signCacheRef.current.fn) {
-      signCacheRef.current = {
-        fn: createMemoizedSignMessage(signMessage!),
-        key: walletKey,
-      };
+    if (mvkCacheRef.current?.key === walletKey) {
+      return mvkCacheRef.current.mvkHex;
     }
-    return signCacheRef.current.fn!;
-  }
-
-  async function getOrDeriveNk() {
-    const walletKey = publicKey!.toBase58();
-    if (nkCacheRef.current?.key === walletKey) {
-      return nkCacheRef.current;
-    }
-    const result = await deriveNk(getMemoizedSign());
-    nkCacheRef.current = { ...result, key: walletKey };
-    return nkCacheRef.current;
+    const { mvkHex } = await deriveMvk(client);
+    mvkCacheRef.current = { mvkHex, key: walletKey };
+    return mvkHex;
   }
 
   async function handleGenerate() {
-    if (!publicKey || !signMessage) return;
+    if (!publicKey) return;
     if (!auditor.trim() || !dateFrom || !dateTo) return;
 
-    setState("signing");
+    setState("deriving");
     setError(null);
-    setRegWarning(null);
     setLastToken(null);
 
     try {
-      const { nsk, nkHex } = await getOrDeriveNk();
-
-      // Register NK with relay so chain notes are encrypted for this wallet.
-      setState("registering");
-      try {
-        await registerNkWithRelay(
-          cloakConfig.relayUrl,
-          publicKey,
-          nsk,
-          getMemoizedSign(),
-        );
-      } catch (regErr) {
-        // Non-fatal: scanning still works via ATA fallback.
-        const msg = regErr instanceof Error ? regErr.message : String(regErr);
-        setRegWarning(`Relay registration skipped: ${msg}`);
-      }
+      const mvkHex = await getOrDeriveMvk();
+      const scopedUtxos = scopedReceivedUtxos(
+        publicKey.toBase58(),
+        dateFrom,
+        dateTo,
+      );
 
       const vk = addViewingKey(solanaConfig.cluster, publicKey.toBase58(), {
         auditor: auditor.trim(),
         dateFrom,
         dateTo,
-        nkHex,
+        nkHex: mvkHex,
+        utxos: scopedUtxos,
       });
 
       setLastToken(encodeViewingKeyToken(vk));
@@ -140,43 +140,23 @@ export default function CompliancePage() {
   }
 
   async function handleExportCsv(
-    nkHex: string,
-    dateFrom: string,
-    dateTo: string,
-    keyId: string,
+    key: ViewingKey,
   ) {
     if (!publicKey || exporting) return;
-    setExporting(keyId);
+    setExporting(key.id);
     try {
-      // Convert ISO date strings to millisecond timestamps.
-      // beforeTimestamp includes the full final day (+1 day - 1 ms).
-      const afterTimestamp = new Date(dateFrom).getTime();
-      const beforeTimestamp = new Date(dateTo).getTime() + 86_400_000 - 1;
+      const utxos = key.utxos ?? scopedReceivedUtxos(
+        publicKey.toBase58(),
+        key.dateFrom,
+        key.dateTo,
+      );
 
-      const res = await fetch("/api/scan-received", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          wallet: publicKey.toBase58(),
-          viewingKeyNk: nkHex,
-          afterTimestamp,
-          beforeTimestamp,
-        }),
-      });
-      if (!res.ok) {
-        const body = (await res.json()) as { error?: string };
-        throw new Error(body.error ?? `Scan failed (${res.status})`);
-      }
-      const { report } = (await res.json()) as { report: unknown };
-
-      const { formatComplianceCsv } = await import("@cloak.dev/sdk");
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const csv = formatComplianceCsv(report as any);
+      const csv = formatUtxoCsv(utxos);
       const blob = new Blob([csv], { type: "text/csv" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `onyx-audit-${dateFrom}-to-${dateTo}.csv`;
+      a.download = `onyx-audit-${key.dateFrom}-to-${key.dateTo}.csv`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
@@ -187,15 +167,13 @@ export default function CompliancePage() {
     }
   }
 
-  const canGenerate =
-    !!publicKey && !!signMessage && auditor.trim().length > 0 && !!dateFrom && !!dateTo;
-  const isLoading = state === "signing" || state === "registering";
+  const canGenerate = !!publicKey && !!client && auditor.trim().length > 0 && !!dateFrom && !!dateTo;
+  const isLoading = state === "deriving";
 
   const stateLabel: Record<GenerateState, string> = {
-    idle: "Generate viewing key",
-    signing: "Signing…",
-    registering: "Registering with relay…",
-    done: "Generate viewing key",
+    idle: "Generate audit key",
+    deriving: "Deriving access key…",
+    done: "Generate audit key",
     error: "Try again",
   };
 
@@ -211,7 +189,7 @@ export default function CompliancePage() {
         </span>
         <div className="mt-3 flex items-center justify-between gap-4">
           <h1 className="text-[26px] font-bold tracking-[-0.03em] text-foreground sm:text-[32px]">
-            Key Generation
+            Audit Access Keys
           </h1>
         </div>
         <div className="mt-4 h-px bg-gradient-to-r from-primary/40 via-border/50 to-transparent" />
@@ -232,10 +210,10 @@ export default function CompliancePage() {
             </div>
             <div>
               <h2 className="text-[16px] font-medium tracking-tight text-foreground">
-                Issue a viewing key
+                Issue an audit access key
               </h2>
               <p className="mt-1 text-[13px] leading-5 text-muted-foreground">
-                Date-ranged, read-only, revocable. Derived locally from your master key — never sent to any server.
+                Date-ranged, read-only audit snapshot from your synced Umbra received UTXOs. Under the hood this uses an Umbra viewing key derived locally; it is never sent to any server.
               </p>
             </div>
           </div>
@@ -277,9 +255,9 @@ export default function CompliancePage() {
           {/* How it works */}
           <div className="flex flex-col gap-3 rounded-xl border border-dashed border-primary/20 bg-primary/5 p-4">
             {[
-              "NK derived from SIGN_IN_MESSAGE — same wallet always produces the same key.",
-              "Registered with the Cloak relay so chain notes are encrypted for you.",
-              "Token encodes NK + date range. Revoke any time — auditor loses access instantly.",
+              "Sync received payments on History first so the token includes the latest Umbra scan rows.",
+              "The generated token includes access metadata, date range, and a scoped UTXO snapshot for the auditor portal.",
+              "Archiving an audit key removes it from this device. Already-shared snapshot tokens cannot be recalled.",
             ].map((t, i) => (
               <motion.p
                 key={t}
@@ -301,14 +279,15 @@ export default function CompliancePage() {
 
           {!publicKey && (
             <p className="text-[12.5px] text-amber-400">
-              Connect your wallet to generate a viewing key.
+              Connect your wallet to generate an audit access key.
             </p>
           )}
 
-          {/* Relay registration warning (non-fatal) */}
-          {regWarning && (
-            <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-400">
-              {regWarning}
+          {publicKey && !client && (
+            <p className="text-[12.5px] text-amber-400">
+              {isRegistering
+                ? "Registering with Umbra — this is a one-time setup, please wait."
+                : "Umbra client initializing — please wait a moment."}
             </p>
           )}
 
@@ -323,7 +302,7 @@ export default function CompliancePage() {
           {lastToken && (
             <div className="flex flex-col gap-2 rounded-xl border border-primary/30 bg-primary/5 p-4">
               <p className="text-[12px] font-medium text-primary">
-                Viewing key ready — share this token with your auditor:
+                Audit access key ready — share this token with your auditor:
               </p>
               <div className="flex items-center gap-2">
                 <code className="min-w-0 flex-1 truncate rounded-md bg-background/60 px-2 py-1.5 font-mono text-[11px] text-foreground/80">
@@ -351,7 +330,7 @@ export default function CompliancePage() {
                 >
                   /audit
                 </a>{" "}
-                to run a verifiable scan for the date range you specified.
+                to view the date-bounded snapshot. Use Export CSV below to generate the same scoped report.
               </p>
             </div>
           )}
@@ -394,7 +373,7 @@ export default function CompliancePage() {
           >
             <div className="flex items-center justify-between">
               <h3 className="text-[14px] font-medium tracking-tight text-foreground">
-                Active keys
+                Active audit keys
               </h3>
               <span className="font-mono text-[11px] text-muted-foreground">
                 {activeKeys.length} issued
@@ -403,7 +382,7 @@ export default function CompliancePage() {
 
             {activeKeys.length === 0 ? (
               <p className="mt-4 text-[12.5px] text-muted-foreground">
-                No active keys yet.
+                No active audit keys yet.
               </p>
             ) : (
               <ul className="mt-4 flex flex-col gap-2">
@@ -426,6 +405,9 @@ export default function CompliancePage() {
                         </p>
                         <p className="text-[11.5px] text-muted-foreground">
                           {k.dateFrom} → {k.dateTo}
+                        </p>
+                        <p className="text-[11.5px] text-muted-foreground">
+                          {k.utxos?.length ?? 0} synced Umbra row{k.utxos?.length === 1 ? "" : "s"}
                         </p>
                         <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground/70">
                           {token.slice(0, 20)}…
@@ -452,9 +434,7 @@ export default function CompliancePage() {
                           type="button"
                           aria-label="Export CSV"
                           title="Export scoped CSV"
-                          onClick={() =>
-                            handleExportCsv(k.nkHex, k.dateFrom, k.dateTo, k.id)
-                          }
+                          onClick={() => handleExportCsv(k)}
                           disabled={!!exporting}
                           className="text-muted-foreground transition-colors hover:text-primary disabled:opacity-50"
                         >
@@ -467,8 +447,8 @@ export default function CompliancePage() {
                         </button>
                         <button
                           type="button"
-                          aria-label="Revoke key"
-                          title="Revoke — auditor loses access immediately"
+                          aria-label="Archive key"
+                          title="Archive local key"
                           onClick={() => handleRevoke(k.id)}
                           className="text-muted-foreground transition-colors hover:text-destructive"
                         >
@@ -482,7 +462,7 @@ export default function CompliancePage() {
             )}
           </motion.section>
 
-          {/* Revoked keys */}
+          {/* Archived keys */}
           {revokedKeys.length > 0 && (
             <motion.section
               initial={{ opacity: 0, y: 8 }}
@@ -492,7 +472,7 @@ export default function CompliancePage() {
             >
               <div className="flex items-center justify-between">
                 <h3 className="text-[14px] font-medium tracking-tight text-foreground">
-                  Revoked
+                  Archived
                 </h3>
                 <HugeiconsIcon
                   icon={FileSecurityIcon}
