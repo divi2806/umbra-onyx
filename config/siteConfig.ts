@@ -58,6 +58,6 @@ export const siteConfig: Metadata = {
     "DAO payroll",
     "Solana payments",
     "compliance export",
-    "Cloak SDK",
+    "Umbra SDK",
   ],
 };
