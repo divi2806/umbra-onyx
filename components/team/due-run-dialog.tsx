@@ -7,6 +7,9 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useWallet } from "@solana/wallet-adapter-react";
+import { fromLegacyPublicKey } from "@solana/compat";
+import { PublicKey } from "@solana/web3.js";
+import type { Address } from "@solana/kit";
 import * as React from "react";
 
 import { Button } from "@/components/ui/button";
@@ -22,23 +25,21 @@ import { FancyButton } from "@/components/ui/fancy-button";
 import {
   appendPayment,
   formatBaseUnits,
-} from "@/lib/cloak/payment-history";
-import { toBaseUnits } from "@/lib/cloak/tokens";
-import { useBatchPayroll } from "@/lib/cloak/use-batch-payroll";
+} from "@/lib/umbra/payment-history";
+import { toBaseUnits } from "@/lib/umbra/tokens";
+import { useUmbraClient, useUmbraClientState } from "@/lib/umbra/client";
+import { umbraSendOnce } from "@/lib/umbra/umbra-send-core";
 import { solanaConfig } from "@/lib/solana/config";
 import { solscanTxUrl } from "@/lib/solana/explorer";
 import { markMemberPaid } from "@/lib/team/storage";
 import type { DueGroup } from "@/lib/team/use-due-members";
 import { cn } from "@/lib/utils";
 
-const VARIABLE_FEE_BPS = 30n;
-const FIXED_FEE_LAMPORTS = 5_000_000n;
-
 type GroupOutcome = {
   confirmed: number;
   failed: number;
   total: number;
-  depositSignature: string | null;
+  firstSignature: string | null;
 };
 
 export function DueRunDialog({
@@ -56,8 +57,8 @@ export function DueRunDialog({
         <DialogHeader>
           <DialogTitle>Run scheduled payments</DialogTitle>
           <DialogDescription>
-            One signature per token group. Each batch shields, then pays each
-            recipient privately.
+            Each payment creates a shielded UTXO — the recipient can scan and
+            claim it privately.
           </DialogDescription>
         </DialogHeader>
 
@@ -75,102 +76,95 @@ function DueRunBody({
   onClose: () => void;
 }) {
   const wallet = useWallet();
-  const batch = useBatchPayroll();
+  const client = useUmbraClient();
+  const clientReady = useUmbraClientState().status === "ready";
 
-  // Snapshot the groups at open time. Once a payment succeeds, markMemberPaid
-  // updates lastPaidAt and the upstream `groups` prop drops that member from
-  // the due list, which would otherwise empty the dialog mid-run.
+  // Snapshot groups at open time so completed rows don't vanish mid-run.
   const [snapshot] = React.useState<DueGroup[]>(() => groups);
 
   const [activeMint, setActiveMint] = React.useState<string | null>(null);
   const [outcomes, setOutcomes] = React.useState<Record<string, GroupOutcome>>({});
   const [allRunning, setAllRunning] = React.useState(false);
 
-  const isRunning = batch.status === "running" || allRunning;
+  const isRunning = activeMint !== null || allRunning;
   const remainingGroups = snapshot.filter((g) => !outcomes[g.mint]);
 
-  const runGroup = React.useCallback(async (group: DueGroup) => {
-    if (!wallet.publicKey) return;
-    if (batch.status !== "idle") batch.reset();
+  const runGroup = React.useCallback(
+    async (group: DueGroup) => {
+      if (!wallet.publicKey || !client) return;
 
-    setActiveMint(group.mint);
+      setActiveMint(group.mint);
 
-    const rows = group.members
-      .filter((m) => m.schedule)
-      .map((m, i) => ({
-        memberId: m.id,
-        amountBaseUnits: toBaseUnits(m.schedule!.amount, group.token.decimals),
-        recipient: m.wallet,
-        rowId: i + 1,
+      const rows = group.members
+        .filter((m) => m.schedule)
+        .map((m, i) => ({
+          memberId: m.id,
+          amountBaseUnits: toBaseUnits(m.schedule!.amount, group.token.decimals),
+          recipient: m.wallet,
+          rowId: i + 1,
+        }));
+
+      const sender = wallet.publicKey.toBase58();
+      const mint = group.token.mint; // already Address
+      let confirmed = 0;
+      let failed = 0;
+      let firstSignature: string | null = null;
+
+      for (const row of rows) {
+        try {
+          const recipient = fromLegacyPublicKey(
+            new PublicKey(row.recipient),
+          ) as Address;
+
+          const result = await umbraSendOnce({
+            amountBaseUnits: row.amountBaseUnits,
+            mint,
+            recipient,
+            client,
+          });
+
+          if (!firstSignature) firstSignature = result.createUtxoSignature;
+          confirmed += 1;
+
+          markMemberPaid(solanaConfig.cluster, row.memberId);
+
+          appendPayment(sender, solanaConfig.cluster, {
+            id: result.createUtxoSignature,
+            cluster: solanaConfig.cluster,
+            sender,
+            recipient: row.recipient,
+            token: group.token.id,
+            mint: group.token.mint as string,
+            decimals: group.token.decimals,
+            amountRaw: row.amountBaseUnits.toString(),
+            netRaw: row.amountBaseUnits.toString(),
+            depositSignature: result.createProofAccountSignature,
+            withdrawSignature: result.createUtxoSignature,
+            timestamp: Date.now(),
+            batchId: firstSignature ?? undefined,
+            source: "recurring",
+          });
+        } catch {
+          failed += 1;
+        }
+      }
+
+      setOutcomes((prev) => ({
+        ...prev,
+        [group.mint]: {
+          confirmed,
+          failed,
+          total: rows.length,
+          firstSignature,
+        },
       }));
-
-    const idToRow = new Map(rows.map((r) => [r.rowId, r]));
-
-    const outcome = await batch.run({
-      rows: rows.map((r) => ({
-        id: r.rowId,
-        recipient: r.recipient,
-        amountBaseUnits: r.amountBaseUnits,
-      })),
-      mint: group.token.mint,
-      tokenId: group.token.id,
-      decimals: group.token.decimals,
-    });
-
-    if (!outcome) {
       setActiveMint(null);
-      return;
-    }
-
-    const sender = wallet.publicKey.toBase58();
-
-    for (const result of outcome.results) {
-      if (!result.ok) continue;
-      const row = idToRow.get(result.id);
-      if (!row) continue;
-
-      markMemberPaid(solanaConfig.cluster, row.memberId);
-
-      const variableFee =
-        (row.amountBaseUnits * VARIABLE_FEE_BPS) / 10_000n;
-      const fixedDeducted =
-        group.token.id === "SOL" ? FIXED_FEE_LAMPORTS : 0n;
-      const net = row.amountBaseUnits - variableFee - fixedDeducted;
-      const netSafe = net < 0n ? 0n : net;
-
-      appendPayment(sender, solanaConfig.cluster, {
-        id: result.payoutSig,
-        cluster: solanaConfig.cluster,
-        sender,
-        recipient: row.recipient,
-        token: group.token.id,
-        mint: group.token.mint.toBase58(),
-        decimals: group.token.decimals,
-        amountRaw: row.amountBaseUnits.toString(),
-        netRaw: netSafe.toString(),
-        depositSignature: outcome.depositSignature,
-        withdrawSignature: result.payoutSig,
-        timestamp: Date.now(),
-        batchId: outcome.depositSignature,
-        source: "recurring",
-      });
-    }
-
-    setOutcomes((prev) => ({
-      ...prev,
-      [group.mint]: {
-        confirmed: outcome.confirmed,
-        failed: outcome.failed,
-        total: outcome.total,
-        depositSignature: outcome.depositSignature,
-      },
-    }));
-    setActiveMint(null);
-    batch.reset();
-  }, [batch, wallet.publicKey]);
+    },
+    [client, wallet.publicKey],
+  );
 
   const runAll = React.useCallback(async () => {
-    if (!wallet.publicKey) return;
+    if (!wallet.publicKey || !client) return;
     setAllRunning(true);
     try {
       const pending = snapshot.filter((g) => !outcomes[g.mint]);
@@ -180,7 +174,7 @@ function DueRunBody({
     } finally {
       setAllRunning(false);
     }
-  }, [snapshot, outcomes, runGroup, wallet.publicKey]);
+  }, [snapshot, outcomes, runGroup, wallet.publicKey, client]);
 
   const totalDueRows = snapshot.reduce((acc, g) => acc + g.members.length, 0);
   const remainingCount = remainingGroups.length;
@@ -206,9 +200,9 @@ function DueRunBody({
             </p>
             <p className="mt-0.5 text-[11.5px] text-muted-foreground">
               {remainingCount === 1
-                ? "1 wallet signature"
-                : `${remainingCount} wallet signatures`}{" "}
-              · one shielded deposit per token, then private payouts
+                ? "1 signature"
+                : `${remainingCount} signatures`}{" "}
+              · shielded UTXO per recipient
               {completedCount > 0 && ` · ${completedCount} already done`}
             </p>
           </div>
@@ -216,7 +210,7 @@ function DueRunBody({
             type="button"
             variant="primary"
             size="md"
-            disabled={isRunning || !wallet.connected}
+            disabled={isRunning || !wallet.connected || !clientReady}
             onClick={runAll}
             className="self-stretch sm:self-auto"
           >
@@ -248,7 +242,7 @@ function DueRunBody({
               group={group}
               outcome={outcome}
               running={running}
-              disabled={isRunning || !wallet.connected}
+              disabled={isRunning || !wallet.connected || !clientReady}
               onRun={() => runGroup(group)}
             />
           );
@@ -296,14 +290,9 @@ function RunSummary({
     for (const m of group.members) {
       if (!m.schedule) continue;
       try {
-        const gross = toBaseUnits(m.schedule.amount, group.token.decimals);
-        const variable = (gross * VARIABLE_FEE_BPS) / 10_000n;
-        const fixed =
-          group.token.id === "SOL" ? FIXED_FEE_LAMPORTS : 0n;
-        const memberNet = gross - variable - fixed;
-        net += memberNet < 0n ? 0n : memberNet;
+        net += toBaseUnits(m.schedule.amount, group.token.decimals);
       } catch {
-        // ignore per-member parse errors; the row would have failed validation
+        // ignore per-member parse errors
       }
     }
     perToken.push({
@@ -329,7 +318,9 @@ function RunSummary({
           aria-hidden="true"
           className={cn(
             "grid size-8 shrink-0 place-items-center rounded-full",
-            allOk ? "bg-primary/20 text-primary" : "bg-destructive/20 text-destructive",
+            allOk
+              ? "bg-primary/20 text-primary"
+              : "bg-destructive/20 text-destructive",
           )}
         >
           <HugeiconsIcon
@@ -414,9 +405,7 @@ function GroupCard({
             )}
           >
             <HugeiconsIcon
-              icon={
-                outcome.failed === 0 ? CheckmarkCircle01Icon : Alert02Icon
-              }
+              icon={outcome.failed === 0 ? CheckmarkCircle01Icon : Alert02Icon}
               size={11}
               strokeWidth={2.4}
             />
@@ -463,16 +452,16 @@ function GroupCard({
         ))}
       </ul>
 
-      {outcome?.depositSignature && (
+      {outcome?.firstSignature && (
         <p className="text-[11px] text-muted-foreground">
-          Batch deposit:{" "}
+          First UTXO:{" "}
           <a
-            href={solscanTxUrl(outcome.depositSignature)}
+            href={solscanTxUrl(outcome.firstSignature)}
             target="_blank"
             rel="noreferrer"
             className="font-mono text-foreground/80 underline underline-offset-2"
           >
-            {shortSig(outcome.depositSignature)} ↗
+            {shortSig(outcome.firstSignature)} ↗
           </a>
         </p>
       )}
