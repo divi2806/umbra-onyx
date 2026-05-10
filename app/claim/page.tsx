@@ -8,28 +8,27 @@ import {
   LockIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
-import { PublicKey } from "@solana/web3.js";
+import { useWallet } from "@solana/wallet-adapter-react";
+import type { Address } from "@solana/kit";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import * as React from "react";
 
 import { ConnectButton } from "@/components/solana/connect-button";
+import { NetworkSwitcher } from "@/components/solana/network-switcher";
 import { OnyxMark } from "@/components/logos";
 import { FancyButton } from "@/components/ui/fancy-button";
-import { cloakConfig } from "@/lib/cloak/config";
-import { decodeClaimPayload } from "@/lib/cloak/invoice";
-import { fastSendOnce } from "@/lib/cloak/fast-send-core";
-import { createMemoizedSignMessage } from "@/lib/cloak/sign-message-cache";
-import { getShieldToken, toBaseUnits } from "@/lib/cloak/tokens";
-import { applyBufferPolyfill } from "@/lib/buffer-polyfill";
+import { decodeClaimPayload } from "@/lib/umbra/invoice";
+import { umbraSendOnce } from "@/lib/umbra/umbra-send-core";
+import { useUmbraClient, useUmbraClientState } from "@/lib/umbra/client";
+import { getShieldToken, toBaseUnits } from "@/lib/umbra/tokens";
 
 type PayState = "idle" | "paying" | "success" | "error";
 
 function ClaimPageInner() {
   const params = useSearchParams();
-  const { connection } = useConnection();
-  const { publicKey, signTransaction, signMessage } = useWallet();
+  const { publicKey } = useWallet();
+  const client = useUmbraClient();
 
   const vParam = params.get("v") ?? "";
   const payload = React.useMemo(() => decodeClaimPayload(vParam), [vParam]);
@@ -39,48 +38,33 @@ function ClaimPageInner() {
   const [txSig, setTxSig] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
-  const signMessageCacheRef = React.useRef<{
-    fn: ((msg: Uint8Array) => Promise<Uint8Array>) | null;
-    key: string;
-  }>({ fn: null, key: "" });
-
   const token = payload ? getShieldToken(payload.s) : null;
 
   async function handlePay() {
-    if (!payload || !publicKey || !signTransaction || !signMessage || !token) return;
+    if (!payload || !publicKey || !client || !token) return;
 
     setPayState("paying");
     setError(null);
-    setProgress("Preparing payment…");
+    setProgress("Preparing ZK proof…");
 
     try {
-      applyBufferPolyfill();
-
-      const walletKey = publicKey.toBase58();
-      if (signMessageCacheRef.current.key !== walletKey || !signMessageCacheRef.current.fn) {
-        signMessageCacheRef.current = {
-          fn: createMemoizedSignMessage(signMessage),
-          key: walletKey,
-        };
-      }
-
       const amountBaseUnits = toBaseUnits(payload.a, token.decimals);
-      const recipient = new PublicKey(payload.r);
+      const recipient = payload.r as Address;
+      const mint = token.mint;
 
-      const result = await fastSendOnce({
+      const result = await umbraSendOnce({
         amountBaseUnits,
-        mint: token.mint,
+        mint,
         recipient,
-        sender: publicKey,
-        connection,
-        programId: cloakConfig.programId,
-        relayUrl: cloakConfig.relayUrl,
-        signTransaction,
-        signMessage: signMessageCacheRef.current.fn!,
-        onProgress: (status) => setProgress(status),
+        client,
+        onPhase: (phase) => {
+          if (phase === "proof") setProgress("Generating ZK proof…");
+          else if (phase === "submit") setProgress("Submitting transaction…");
+        },
+        onProgress: (msg) => setProgress(msg),
       });
 
-      setTxSig(result.withdrawSignature);
+      setTxSig(result.createUtxoSignature);
       setPayState("success");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Payment failed.");
@@ -89,6 +73,9 @@ function ClaimPageInner() {
   }
 
   const isLoading = payState === "paying";
+  const umbraStatus = useUmbraClientState().status;
+  const clientReady = !!client;
+  const isRegistering = umbraStatus === "connecting" || umbraStatus === "registering";
 
   if (!payload) {
     return (
@@ -115,6 +102,9 @@ function ClaimPageInner() {
         </Link>
         <div className="h-5 w-px bg-border" />
         <span className="text-[13px] text-muted-foreground">Payment request</span>
+        <div className="ml-auto">
+          <NetworkSwitcher />
+        </div>
       </header>
 
       <main className="mx-auto max-w-md px-4 py-16">
@@ -134,13 +124,13 @@ function ClaimPageInner() {
                 Payment sent
               </h1>
               <p className="mt-2 text-[13.5px] text-muted-foreground">
-                {payload.a} {payload.s} routed through the shielded pool. The recipient will
-                receive funds shortly.
+                {payload.a} {payload.s} sent as a shielded UTXO. The recipient can scan
+                and claim it from their wallet.
               </p>
             </div>
             <div className="w-full rounded-xl border border-border bg-card/60 p-4 text-left">
               <p className="text-[11.5px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                Transaction
+                UTXO Transaction
               </p>
               <p className="mt-1 truncate font-mono text-[12.5px] text-foreground">
                 {txSig}
@@ -196,15 +186,15 @@ function ClaimPageInner() {
                 <span className="text-[13px] text-muted-foreground">Route</span>
                 <span className="flex items-center gap-1.5 text-[12.5px] text-primary">
                   <HugeiconsIcon icon={LockIcon} size={12} strokeWidth={2} />
-                  Cloak shielded pool
+                  Umbra shielded UTXO
                 </span>
               </div>
             </div>
 
             {/* Privacy note */}
             <p className="text-[12px] leading-5 text-muted-foreground">
-              Your payment flows through a ZK shielded pool. On-chain, there is no direct
-              link between your wallet and the recipient.
+              Your payment creates a shielded UTXO in the Umbra mixer. On-chain, there is no
+              direct link between your wallet and the recipient.
             </p>
 
             {/* Error */}
@@ -225,7 +215,7 @@ function ClaimPageInner() {
                 variant="primary"
                 size="lg"
                 onClick={handlePay}
-                disabled={isLoading || !token}
+                disabled={isLoading || !token || !clientReady}
               >
                 {isLoading ? (
                   <>
@@ -236,6 +226,16 @@ function ClaimPageInner() {
                       className="animate-spin"
                     />
                     {progress ?? "Paying…"}
+                  </>
+                ) : !clientReady ? (
+                  <>
+                    <HugeiconsIcon
+                      icon={Loading03Icon}
+                      size={14}
+                      strokeWidth={2.2}
+                      className="animate-spin"
+                    />
+                    {isRegistering ? "Registering with Umbra…" : "Initializing…"}
                   </>
                 ) : (
                   <>
