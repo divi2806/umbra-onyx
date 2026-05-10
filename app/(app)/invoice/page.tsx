@@ -16,8 +16,9 @@ import { SolanaLogo, UsdcLogo, UsdtLogo } from "@/components/logos";
 import { FancyButton } from "@/components/ui/fancy-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { createInvoice, loadInvoices, type Invoice } from "@/lib/cloak/invoice";
-import { getShieldToken, isShieldTokenSupported, type ShieldTokenId } from "@/lib/cloak/tokens";
+import { ensureUmbraFullRegistration, useUmbraClient } from "@/lib/umbra/client";
+import { createInvoice, loadInvoices, type Invoice } from "@/lib/umbra/invoice";
+import { getShieldToken, isShieldTokenSupported, type ShieldTokenId } from "@/lib/umbra/tokens";
 import { solanaConfig } from "@/lib/solana/config";
 import { cn } from "@/lib/utils";
 
@@ -30,30 +31,33 @@ const TOKENS = [
 
 export default function InvoicePage() {
   const { publicKey } = useWallet();
+  const client = useUmbraClient();
   const wallet = publicKey?.toBase58() ?? "";
 
   const [token, setToken] = React.useState<ShieldTokenId>("USDC");
   const [amount, setAmount] = React.useState("");
   const [memo, setMemo] = React.useState("");
   const [creating, setCreating] = React.useState(false);
+  const [createError, setCreateError] = React.useState<string | null>(null);
+  const [createProgress, setCreateProgress] = React.useState<string | null>(null);
   const [lastInvoice, setLastInvoice] = React.useState<Invoice | null>(null);
   const [copied, setCopied] = React.useState(false);
-  const [invoices, setInvoices] = React.useState<Invoice[]>([]);
-
-  React.useEffect(() => {
-    if (wallet) {
-      setInvoices(loadInvoices(solanaConfig.cluster, wallet));
-    }
-  }, [wallet, lastInvoice]);
+  const invoices = wallet ? loadInvoices(solanaConfig.cluster, wallet) : [];
 
   const validAmount = /^\d+(\.\d+)?$/.test(amount.trim()) && Number(amount.trim()) > 0;
   const supported = isShieldTokenSupported(token);
-  const canCreate = !!wallet && validAmount && supported;
+  const canCreate = !!wallet && !!client && validAmount && supported && !creating;
 
-  function handleCreate() {
-    if (!canCreate) return;
+  async function handleCreate() {
+    if (!canCreate || !client) return;
     setCreating(true);
+    setCreateError(null);
+    setCreateProgress("Preparing Umbra account…");
     try {
+      await ensureUmbraFullRegistration(client, {
+        onProgress: setCreateProgress,
+      });
+      setCreateProgress("Creating invoice link…");
       const baseUrl =
         typeof window !== "undefined" ? window.location.origin : "https://onyx-red.vercel.app/";
       const inv = createInvoice(
@@ -61,7 +65,7 @@ export default function InvoicePage() {
         wallet,
         {
           amount: amount.trim(),
-          mint: getShieldToken(token)!.mint.toBase58(),
+          mint: getShieldToken(token)!.mint as string,
           symbol: token,
           memo: memo.trim() || undefined,
         },
@@ -70,7 +74,10 @@ export default function InvoicePage() {
       setLastInvoice(inv);
       setAmount("");
       setMemo("");
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : String(err));
     } finally {
+      setCreateProgress(null);
       setCreating(false);
     }
   }
@@ -196,6 +203,24 @@ export default function InvoicePage() {
             </p>
           )}
 
+          {wallet && !client && (
+            <p className="text-[13px] text-white/50 font-medium ml-1">
+              Initializing Umbra client…
+            </p>
+          )}
+
+          {createProgress && (
+            <p className="text-[13px] text-white/60 font-medium ml-1">
+              {createProgress}
+            </p>
+          )}
+
+          {createError && (
+            <p className="rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-[12.5px] text-destructive">
+              {createError}
+            </p>
+          )}
+
           {lastInvoice && (
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
@@ -235,7 +260,7 @@ export default function InvoicePage() {
             size="lg"
             className="self-start mt-2 h-14 rounded-2xl text-[15px] shadow-[0_0_20px_rgba(var(--primary-rgb),0.3)] hover:shadow-[0_0_30px_rgba(var(--primary-rgb),0.5)] transition-shadow px-8"
             onClick={handleCreate}
-            disabled={!canCreate || creating}
+            disabled={!canCreate}
           >
             {creating ? (
               <>
@@ -245,7 +270,7 @@ export default function InvoicePage() {
                   strokeWidth={2.2}
                   className="animate-spin"
                 />
-                Creating…
+                {createProgress ?? "Creating…"}
               </>
             ) : (
               <>
