@@ -4,8 +4,8 @@ import { motion } from "motion/react";
 import { usePathname } from "next/navigation";
 import * as React from "react";
 
-import { ClusterBadge } from "@/components/solana/cluster-badge";
 import { ConnectButton } from "@/components/solana/connect-button";
+import { NetworkSwitcher } from "@/components/solana/network-switcher";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 
 const TITLES: Record<string, { title: string; subtitle: string }> = {
@@ -26,8 +26,8 @@ const TITLES: Record<string, { title: string; subtitle: string }> = {
     subtitle: "Your sealed outbound record — chain-verified, privately held",
   },
   "/compliance": {
-    title: "Compliance",
-    subtitle: "Scoped viewing keys · share exactly what auditors need",
+    title: "Audit Access",
+    subtitle: "Scoped audit keys · share exactly what auditors need",
   },
   "/invoice": {
     title: "Invoice",
@@ -65,7 +65,7 @@ export function AppTopbar() {
         </motion.div>
       </div>
 
-      <ClusterBadge />
+      <NetworkSwitcher />
       <ConnectButton />
     </header>
   );
