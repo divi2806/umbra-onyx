@@ -5,9 +5,13 @@ import { cn } from "@/lib/utils";
 
 const STYLES: Record<
   typeof solanaConfig.cluster,
-  { label: string; dot: string; chip: string } | null
+  { label: string; dot: string; chip: string }
 > = {
-  "mainnet-beta": null,
+  "mainnet-beta": {
+    label: "Mainnet",
+    dot: "bg-emerald-400",
+    chip: "border-emerald-400/25 bg-emerald-400/10 text-emerald-300",
+  },
   devnet: {
     label: "Devnet",
     dot: "bg-primary",
@@ -27,7 +31,6 @@ const STYLES: Record<
 
 export function ClusterBadge({ className }: { className?: string }) {
   const style = STYLES[solanaConfig.cluster];
-  if (!style) return null;
 
   return (
     <span
