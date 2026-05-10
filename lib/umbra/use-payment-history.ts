@@ -31,12 +31,12 @@ export function usePaymentHistory(): {
       };
       const onStorage = (e: StorageEvent) => {
         if (!e.key) return;
-        if (e.key.startsWith("cloak:payments:v1:")) notify();
+        if (e.key.startsWith("onyx:payments:v1:")) notify();
       };
-      window.addEventListener("cloak:payments-updated", onCustom);
+      window.addEventListener("onyx:payments-updated", onCustom);
       window.addEventListener("storage", onStorage);
       return () => {
-        window.removeEventListener("cloak:payments-updated", onCustom);
+        window.removeEventListener("onyx:payments-updated", onCustom);
         window.removeEventListener("storage", onStorage);
       };
     },

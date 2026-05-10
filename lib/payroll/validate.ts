@@ -1,6 +1,6 @@
 import { isAddress } from "@solana/kit";
 
-import { toBaseUnits, type ShieldToken } from "@/lib/cloak/tokens";
+import { toBaseUnits, type ShieldToken } from "@/lib/umbra/tokens";
 
 import type { PayrollRow } from "./parse-csv";
 

@@ -1,4 +1,4 @@
-import { getShieldTokenByMint } from "@/lib/cloak/tokens";
+import { getShieldTokenByMint } from "@/lib/umbra/tokens";
 
 import {
   TEST_INTERVAL_MAX_SEC,

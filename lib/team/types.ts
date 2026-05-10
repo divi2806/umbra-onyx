@@ -1,4 +1,4 @@
-import type { ShieldTokenId } from "@/lib/cloak/tokens";
+import type { ShieldTokenId } from "@/lib/umbra/tokens";
 
 export type ScheduleCadence =
   | "daily"

@@ -2,7 +2,7 @@
 
 import * as React from "react";
 
-import { getShieldTokenByMint, type ShieldToken } from "@/lib/cloak/tokens";
+import { getShieldTokenByMint, type ShieldToken } from "@/lib/umbra/tokens";
 
 import { isDue } from "./schedule";
 import type { TeamMember } from "./types";

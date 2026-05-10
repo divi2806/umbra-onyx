@@ -1,7 +1,7 @@
 import type { SolanaCluster } from "@/lib/solana/config";
 import type { ShieldTokenId } from "./tokens";
 
-const STORAGE_PREFIX = "cloak:payments:v1";
+const STORAGE_PREFIX = "onyx:payments:v1";
 const MAX_RECORDS = 200;
 
 export type PaymentSource = "pay" | "payroll" | "recurring";
@@ -19,25 +19,15 @@ export type PaymentRecord = {
   depositSignature: string;
   withdrawSignature: string;
   timestamp: number;
-  // When set, this row is one recipient of a payroll batch. All rows from the
-  // same run share this id (the batch's deposit signature).
   batchId?: string;
-  // Where this payment originated. Older records persisted before this field
-  // existed are inferred via inferPaymentSource().
   source?: PaymentSource;
 };
 
-/** Infer the source of a record that pre-dates the explicit `source` field. */
 export function inferPaymentSource(r: PaymentRecord): PaymentSource {
   if (r.source) return r.source;
   return r.batchId ? "payroll" : "pay";
 }
 
-/**
- * Backfill `source` and trim numeric fields on records persisted before the
- * explicit `source` field existed. Idempotent — returns the number of rows
- * touched and only writes (and notifies subscribers) when something changed.
- */
 export function migratePaymentRecords(
   sender: string | null | undefined,
   cluster: SolanaCluster,
@@ -56,8 +46,6 @@ export function migratePaymentRecords(
       touched = true;
     }
 
-    // Older writers occasionally persisted these as numbers. Coerce to string
-    // so downstream BigInt parsing doesn't throw on render.
     if (typeof patched.amountRaw !== "string") {
       patched.amountRaw = String(patched.amountRaw);
       touched = true;
@@ -76,7 +64,7 @@ export function migratePaymentRecords(
   try {
     window.localStorage.setItem(key(sender, cluster), JSON.stringify(next));
     window.dispatchEvent(
-      new CustomEvent("cloak:payments-updated", {
+      new CustomEvent("onyx:payments-updated", {
         detail: { sender, cluster },
       }),
     );
@@ -122,7 +110,7 @@ export function appendPayment(
   try {
     window.localStorage.setItem(key(sender, cluster), JSON.stringify(next));
     window.dispatchEvent(
-      new CustomEvent("cloak:payments-updated", {
+      new CustomEvent("onyx:payments-updated", {
         detail: { sender, cluster },
       }),
     );
@@ -137,7 +125,7 @@ export function clearPayments(sender: string, cluster: SolanaCluster): void {
   try {
     window.localStorage.removeItem(key(sender, cluster));
     window.dispatchEvent(
-      new CustomEvent("cloak:payments-updated", {
+      new CustomEvent("onyx:payments-updated", {
         detail: { sender, cluster },
       }),
     );

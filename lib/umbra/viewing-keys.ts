@@ -1,4 +1,5 @@
 import type { SolanaCluster } from "@/lib/solana/config";
+import type { ReceivedUtxo } from "./scanned-history";
 
 const STORAGE_PREFIX = "onyx:viewing-keys:v1";
 const STORAGE_EVENT = "onyx:viewing-keys-updated";
@@ -10,6 +11,8 @@ export type ViewingKey = {
   dateTo: string;
   nkHex: string;
   wallet: string;
+  cluster?: SolanaCluster;
+  utxos?: ReceivedUtxo[];
   createdAt: number;
   revoked: boolean;
 };
@@ -19,6 +22,9 @@ export type SharableToken = {
   from: string;
   to: string;
   wallet: string;
+  cluster?: SolanaCluster;
+  utxos?: ReceivedUtxo[];
+  issuedAt?: number;
 };
 
 function storageKey(cluster: SolanaCluster, wallet: string): string {
@@ -66,12 +72,14 @@ function newId(): string {
 export function addViewingKey(
   cluster: SolanaCluster,
   wallet: string,
-  draft: Pick<ViewingKey, "auditor" | "dateFrom" | "dateTo" | "nkHex">,
+  draft: Pick<ViewingKey, "auditor" | "dateFrom" | "dateTo" | "nkHex"> &
+    Pick<Partial<ViewingKey>, "utxos">,
 ): ViewingKey {
   const vk: ViewingKey = {
     id: newId(),
     ...draft,
     wallet,
+    cluster,
     createdAt: Date.now(),
     revoked: false,
   };
@@ -93,6 +101,9 @@ export function encodeViewingKeyToken(vk: ViewingKey): string {
     from: vk.dateFrom,
     to: vk.dateTo,
     wallet: vk.wallet,
+    cluster: vk.cluster,
+    utxos: vk.utxos ?? [],
+    issuedAt: vk.createdAt,
   };
   return btoa(JSON.stringify(payload));
 }
@@ -121,6 +132,21 @@ export function decodeViewingKeyToken(token: string): SharableToken | null {
   }
 }
 
+function isReceivedUtxo(v: unknown): v is ReceivedUtxo {
+  if (!v || typeof v !== "object") return false;
+  const r = v as Record<string, unknown>;
+  return (
+    typeof r.treeIndex === "number" &&
+    typeof r.insertionIndex === "number" &&
+    typeof r.amount === "string" &&
+    typeof r.mint === "string" &&
+    typeof r.decimals === "number" &&
+    typeof r.symbol === "string" &&
+    typeof r.destinationAddress === "string" &&
+    typeof r.timestamp === "number"
+  );
+}
+
 function isViewingKey(v: unknown): v is ViewingKey {
   if (!v || typeof v !== "object") return false;
   const r = v as Record<string, unknown>;
@@ -132,6 +158,9 @@ function isViewingKey(v: unknown): v is ViewingKey {
     typeof r.nkHex === "string" &&
     typeof r.wallet === "string" &&
     typeof r.createdAt === "number" &&
-    typeof r.revoked === "boolean"
+    typeof r.revoked === "boolean" &&
+    (r.cluster === undefined || typeof r.cluster === "string") &&
+    (r.utxos === undefined ||
+      (Array.isArray(r.utxos) && r.utxos.every(isReceivedUtxo)))
   );
 }

@@ -18,8 +18,8 @@ export function SolanaProvider({ children }: { children: ReactNode }) {
     // `processed` is the lowest commitment level. Solana txs at this level have
     // been included in a leader's block but not voted on yet. Reorg risk is
     // <1% in normal conditions, and our SDK retry path (stale-note + RootNotFound)
-    // catches the rare case. Trade: faster `confirmTransaction` returns →
-    // noticeably snappier fast-send flow, especially in batch payroll.
+    // catches the rare case. Trade: faster `confirmTransaction` returns for
+    // private sends, especially in batch payroll.
     <ConnectionProvider
       endpoint={solanaConfig.rpcUrl}
       config={{ commitment: "processed" }}

@@ -18,9 +18,6 @@ export function useViewingKeys(): ViewingKey[] {
   const { publicKey } = useWallet();
   const wallet = publicKey?.toBase58() ?? "";
 
-  // useSyncExternalStore requires getSnapshot to return the same reference
-  // when data hasn't changed. loadViewingKeys parses JSON fresh each call,
-  // so we cache by serialized value and only return a new reference on change.
   const cacheRef = React.useRef<{ value: ViewingKey[]; json: string }>({
     value: EMPTY,
     json: "",

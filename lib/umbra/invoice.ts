@@ -6,9 +6,9 @@ const STORAGE_EVENT = "onyx:invoices-updated";
 
 export type Invoice = {
   id: string;
-  recipient: string;   // issuer's Solana wallet (payer sends here via shielded pool)
-  amount: string;      // human-readable e.g. "100.00"
-  mint: string;        // token mint base58
+  recipient: string;
+  amount: string;
+  mint: string;
   symbol: ShieldTokenId;
   memo?: string;
   createdAt: number;
@@ -18,11 +18,11 @@ export type Invoice = {
 };
 
 export type ClaimPayload = {
-  r: string;           // recipient Solana address
-  a: string;           // amount string
-  m: string;           // mint base58
-  s: ShieldTokenId;    // symbol
-  id: string;          // invoice id
+  r: string;
+  a: string;
+  m: string;
+  s: ShieldTokenId;
+  id: string;
   memo?: string;
 };
 
@@ -55,9 +55,7 @@ function persist(cluster: SolanaCluster, wallet: string, invoices: Invoice[]): v
   if (!isBrowser()) return;
   try {
     window.localStorage.setItem(storageKey(cluster, wallet), JSON.stringify(invoices));
-    window.dispatchEvent(
-      new CustomEvent(STORAGE_EVENT, { detail: { cluster, wallet } }),
-    );
+    window.dispatchEvent(new CustomEvent(STORAGE_EVENT, { detail: { cluster, wallet } }));
   } catch {
     // ignore quota errors
   }
@@ -135,9 +133,7 @@ export function markInvoicePaid(
 ): void {
   const current = loadInvoices(cluster, wallet);
   const next = current.map((inv) =>
-    inv.id === id
-      ? { ...inv, paidAt: Date.now(), payerSignature }
-      : inv,
+    inv.id === id ? { ...inv, paidAt: Date.now(), payerSignature } : inv,
   );
   persist(cluster, wallet, next);
 }

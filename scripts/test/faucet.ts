@@ -1,9 +1,5 @@
-// Devnet mock-USDC faucet test.
-//
-// Mints mock USDC to a wallet via Cloak's public faucet API
-// (POST https://devnet.cloak.ag/api/faucet). Default amount is 100 mock USDC.
-//
-// Rate limits: 1000 mock USDC per request, 5000 per wallet/24h, 30s cooldown.
+// Devnet mock-USDC faucet helper.
+// Uses the Umbra/Solana devnet faucet endpoint to mint test USDC to a wallet.
 //
 // Examples:
 //
@@ -20,7 +16,7 @@ import {
   requireEnv,
 } from "./_shared";
 
-const FAUCET_URL = "https://devnet.cloak.ag/api/faucet";
+const FAUCET_URL = "https://faucet.devnet.solana.com";
 const USDC_DECIMALS = 6;
 
 async function main() {

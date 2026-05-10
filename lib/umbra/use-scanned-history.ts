@@ -1,48 +1,51 @@
 "use client";
 
-import type { ComplianceReport } from "@cloak.dev/sdk";
+import { getClaimableUtxoScannerFunction } from "@umbra-privacy/sdk";
+import type { U32 } from "@umbra-privacy/sdk/types";
 import { useWallet } from "@solana/wallet-adapter-react";
 import * as React from "react";
 
 import { solanaConfig } from "@/lib/solana/config";
-
+import { getShieldTokenByMint } from "./tokens";
 import {
   clearScan,
   isScanStale,
   loadScan,
-  mergeReports,
+  mergeScanReports,
+  mintFromLowHigh,
   saveScan,
-  selectReceivedTransactions,
-  type ReceivedTransaction,
+  selectReceivedUtxos,
+  timestampComponentsToMs,
+  type ReceivedUtxo,
   type StoredScan,
 } from "./scanned-history";
+import { useUmbraClient } from "./client";
 
 export type ScanStatus = "idle" | "scanning" | "success" | "error";
 
 export type UseScannedHistory = {
   scan: StoredScan | null;
-  received: ReceivedTransaction[];
+  received: ReceivedUtxo[];
   status: ScanStatus;
   progress: string | null;
   error: Error | null;
-  /** Run (or re-run) a scan. Pure read — no wallet popup. */
+  /** Run (or re-run) an incremental scan. */
   sync: () => Promise<StoredScan>;
-  /** Drop the persisted cache and re-scan from chain head. */
+  /** Drop the persisted cache and re-scan from tree head. */
   reset: () => Promise<StoredScan | null>;
 };
 
-// Re-scan in the background if the cached report is older than this. The
-// API is incremental (only fetches NEW signatures since `lastSignature`),
-// so this is cheap on the second hit.
+// Number of Merkle trees to scan. Umbra has one tree per supported token.
+// Scanning an empty or non-existent tree is a cheap no-op from the indexer side.
+const TREES_TO_SCAN = solanaConfig.cluster === "mainnet-beta" ? 4 : 1;
+
 const STALE_AFTER_MS = 5 * 60 * 1000;
 
 export function useScannedHistory(): UseScannedHistory {
   const wallet = useWallet();
   const sender = wallet.publicKey?.toBase58() ?? null;
+  const client = useUmbraClient();
 
-  // Stable view of the persisted scan, driven by storage events. Cached by
-  // serialized payload so identical reads return the same object reference
-  // and don't re-render unnecessarily.
   const cacheRef = React.useRef<{
     sender: string | null;
     serialized: string;
@@ -57,20 +60,19 @@ export function useScannedHistory(): UseScannedHistory {
           .detail;
         if (
           !detail ||
-          (detail.wallet === sender &&
-            detail.cluster === solanaConfig.cluster)
+          (detail.wallet === sender && detail.cluster === solanaConfig.cluster)
         ) {
           notify();
         }
       };
       const onStorage = (e: StorageEvent) => {
         if (!e.key) return;
-        if (e.key.startsWith("cloak:scanned:v1:")) notify();
+        if (e.key.startsWith("onyx:scanned:v1:")) notify();
       };
-      window.addEventListener("cloak:scanned-updated", onCustom);
+      window.addEventListener("onyx:scanned-updated", onCustom);
       window.addEventListener("storage", onStorage);
       return () => {
-        window.removeEventListener("cloak:scanned-updated", onCustom);
+        window.removeEventListener("onyx:scanned-updated", onCustom);
         window.removeEventListener("storage", onStorage);
       };
     },
@@ -89,54 +91,73 @@ export function useScannedHistory(): UseScannedHistory {
     return fresh;
   }, [sender]);
 
-  const scan = React.useSyncExternalStore(
-    subscribe,
-    getSnapshot,
-    () => null,
-  );
+  const scan = React.useSyncExternalStore(subscribe, getSnapshot, () => null);
 
-  // Transient action state. Only mutated from inside `sync`.
   const [status, setStatus] = React.useState<ScanStatus>("idle");
   const [progress, setProgress] = React.useState<string | null>(null);
   const [error, setError] = React.useState<Error | null>(null);
 
-  // Guard against overlapping syncs (e.g. auto-trigger racing the button).
   const inflightRef = React.useRef<Promise<StoredScan> | null>(null);
 
   const sync = React.useCallback(async () => {
-    if (!sender) {
-      throw new Error("Connect your wallet first.");
-    }
+    if (!sender) throw new Error("Connect your wallet first.");
+    if (!client) throw new Error("Umbra client not ready.");
     if (inflightRef.current) return inflightRef.current;
 
     const previous = loadScan(sender, solanaConfig.cluster);
+    const prevReport = previous?.report ?? null;
 
     setStatus("scanning");
     setError(null);
-    setProgress(
-      previous?.report.lastSignature
-        ? "Checking for new transactions"
-        : "Scanning on-chain transactions",
-    );
+    setProgress("Scanning for received payments");
 
     const run = (async () => {
       try {
-        const res = await fetch("/api/scan-received", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            wallet: sender,
-            untilSignature: previous?.report.lastSignature,
-          }),
-        });
-        if (!res.ok) {
-          const detail = await safeReadError(res);
-          throw new Error(detail);
-        }
-        const json = (await res.json()) as { report: ComplianceReport };
+        const scanner = getClaimableUtxoScannerFunction({ client });
 
-        const merged = mergeReports(previous?.report ?? null, json.report);
+        const freshUtxos: ReceivedUtxo[] = [];
+        const nextIndexByTree: Record<string, number> = {};
+
+        for (let treeIdx = 0; treeIdx < TREES_TO_SCAN; treeIdx++) {
+          const startIndex = prevReport?.nextScanStartIndexByTree[String(treeIdx)] ?? 0;
+          setProgress(`Scanning tree ${treeIdx + 1} of ${TREES_TO_SCAN}`);
+
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const result = await scanner(BigInt(treeIdx) as any as U32, BigInt(startIndex) as any as U32);
+
+          nextIndexByTree[String(treeIdx)] = Number(result.nextScanStartIndex);
+
+          // Combine encrypted-balance received and public-balance received UTXOs.
+          const allReceived = [...result.received, ...result.publicReceived];
+
+          for (const utxo of allReceived) {
+            const mint = mintFromLowHigh(
+              BigInt(utxo.h1Components.mintAddressLow),
+              BigInt(utxo.h1Components.mintAddressHigh),
+            );
+            const token = getShieldTokenByMint(mint);
+            freshUtxos.push({
+              treeIndex: treeIdx,
+              insertionIndex: Number(utxo.insertionIndex),
+              amount: String(utxo.amount),
+              mint,
+              decimals: token?.decimals ?? 9,
+              symbol: token?.id ?? "",
+              destinationAddress: utxo.destinationAddress,
+              timestamp: timestampComponentsToMs(utxo.h1Components.timestamp),
+            });
+          }
+        }
+
+        const freshReport = {
+          utxos: freshUtxos,
+          nextScanStartIndexByTree: nextIndexByTree,
+          transactionCount: freshUtxos.length,
+        };
+
+        const merged = mergeScanReports(prevReport, freshReport);
         const stored = saveScan(sender, solanaConfig.cluster, merged);
+
         setStatus("success");
         setProgress(null);
         return stored;
@@ -153,22 +174,19 @@ export function useScannedHistory(): UseScannedHistory {
 
     inflightRef.current = run;
     return run;
-  }, [sender]);
+  }, [sender, client]);
 
-  // Auto-sync once per (wallet, mount). Refreshes silently if the cache is
-  // stale, otherwise no-ops. Uses a ref-keyed guard so the trigger fires for
-  // a wallet at most once per mount even across re-renders.
   const autoSyncedFor = React.useRef<string | null>(null);
   React.useEffect(() => {
-    if (!sender) return;
+    if (!sender || !client) return;
     if (autoSyncedFor.current === sender) return;
     autoSyncedFor.current = sender;
     const cached = loadScan(sender, solanaConfig.cluster);
     if (cached && !isScanStale(cached, STALE_AFTER_MS)) return;
     void sync().catch(() => {
-      // Surfaced via `error` state.
+      // surfaced via `error` state
     });
-  }, [sender, sync]);
+  }, [sender, client, sync]);
 
   const reset = React.useCallback(async () => {
     if (!sender) return null;
@@ -178,19 +196,9 @@ export function useScannedHistory(): UseScannedHistory {
   }, [sender, sync]);
 
   const received = React.useMemo(
-    () => selectReceivedTransactions(scan?.report),
+    () => selectReceivedUtxos(scan?.report),
     [scan],
   );
 
   return { scan, received, status, progress, error, sync, reset };
-}
-
-async function safeReadError(res: Response): Promise<string> {
-  try {
-    const json = (await res.json()) as { error?: string };
-    if (json && typeof json.error === "string") return json.error;
-  } catch {
-    // not JSON
-  }
-  return `Scan failed (${res.status})`;
 }

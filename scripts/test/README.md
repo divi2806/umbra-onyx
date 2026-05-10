@@ -1,8 +1,7 @@
 # Integration test scripts
 
-Node-side smoke tests that exercise the same Cloak SDK paths the frontend
-wires (`fastSendOnce` → `transact` + `fullWithdraw`), with a local Solana
-keypair instead of a wallet adapter.
+Node-side utilities for testing against the Umbra privacy protocol on Solana
+devnet. These scripts use a local Solana keypair instead of a wallet adapter.
 
 These submit **real transactions** on the cluster you target. Use a dedicated
 test keypair and small amounts.
@@ -16,16 +15,16 @@ test keypair and small amounts.
    solana-keygen new --outfile ~/.config/solana/test.json
    ```
 
-2. Fund the keypair:
-
-   - **Devnet SOL:** `solana airdrop 2 --keypair ~/.config/solana/test.json --url https://api.devnet.solana.com`
-   - **Devnet mock USDC:** see the `test:faucet` script below.
-   - **Mainnet:** real SOL / USDC / USDT, from your usual sources. Tiny amounts only.
-
-3. For mainnet, set a paid RPC URL (the public one will 403 you):
+2. Fund the keypair with devnet SOL for transaction fees:
 
    ```sh
-   export RPC_URL=https://mainnet.helius-rpc.com/?api-key=...
+   solana airdrop 2 --keypair ~/.config/solana/test.json --url https://api.devnet.solana.com
+   ```
+
+3. Mint devnet mock USDC if you want to test SPL-token sends:
+
+   ```sh
+   KEYPAIR=~/.config/solana/test.json pnpm test:faucet
    ```
 
 ## Scripts
@@ -33,78 +32,32 @@ test keypair and small amounts.
 All read config from env vars. Every script exits with a non-zero status on
 failure so they're CI-friendly.
 
-### `pnpm test:pay`
-
-Single private send (deposit → fullWithdraw to recipient's wallet).
-
-| env | required | example |
-|---|---|---|
-| `KEYPAIR` | yes | `~/.config/solana/test.json` |
-| `CLUSTER` | no, default `devnet` | `devnet` \| `mainnet-beta` |
-| `TOKEN` | no, default `SOL` | `SOL` \| `USDC` \| `USDT` (USDT is mainnet-only) |
-| `AMOUNT` | yes | `0.05` (decimal in token units) |
-| `RECIPIENT` | yes | base58 Solana wallet address |
-| `RPC_URL` | no | required for mainnet (public RPC blocks browser-origin) |
-
-```sh
-KEYPAIR=~/.config/solana/test.json \
-CLUSTER=devnet TOKEN=SOL AMOUNT=0.05 \
-RECIPIENT=8gm5X1Nq8f28qu5XPTXk236FVmEufFprFmceRssYzMuk \
-  pnpm test:pay
-```
-
 ### `pnpm test:faucet`
 
-Mints mock USDC to a devnet wallet via Cloak's public faucet.
+Requests devnet mock USDC from the Umbra/Solana faucet for a given wallet.
 
 | env | required | example |
 |---|---|---|
 | `WALLET` | one of `WALLET` or `KEYPAIR` | base58 wallet address |
 | `KEYPAIR` | one of `WALLET` or `KEYPAIR` | path to keypair JSON |
-| `AMOUNT` | no, default `100` | mock USDC (decimal, capped at `1000` per request) |
+| `AMOUNT` | no, default `100` | mock USDC amount to request |
 
 ```sh
 WALLET=8gm5X1Nq8f28qu5XPTXk236FVmEufFprFmceRssYzMuk pnpm test:faucet
 ```
 
-Devnet only. Mainnet uses real Circle USDC.
+Devnet only. This does not airdrop SOL; use `solana airdrop` for fee SOL.
 
-### `pnpm test:payroll`
+## Testing the Umbra send flow
 
-Runs a CSV through the same sequential `fastSendOnce` loop the `/payroll`
-batch hook uses. Failures don't abort; per-row outcome is printed live.
+The frontend integration (register → send → scan → claim) is tested via the
+app UI on devnet:
 
-| env | required | example |
-|---|---|---|
-| `KEYPAIR` | yes | `~/.config/solana/test.json` |
-| `CLUSTER` | no, default `devnet` | |
-| `TOKEN` | no, default `SOL` | |
-| `CSV` | yes | path to CSV with `wallet`, `amount` columns |
-| `RPC_URL` | no | required for mainnet |
+1. Connect a wallet — the app auto-registers with Umbra on first connect.
+2. Use `/pay` to send a shielded payment to a recipient address.
+3. Switch to the recipient wallet and use `/history` to scan for received UTXOs.
+4. Claim from the history page.
 
-```sh
-KEYPAIR=~/.config/solana/test.json \
-CLUSTER=devnet TOKEN=USDC \
-CSV=./scripts/test/sample-roster.csv \
-  pnpm test:payroll
-```
-
-## Pre-prod gate
-
-Before pushing changes that touch the SDK integration to prod:
-
-```sh
-# 1. Devnet SOL — proves the fast-send wiring works.
-KEYPAIR=~/.config/solana/test.json TOKEN=SOL AMOUNT=0.05 RECIPIENT=… pnpm test:pay
-
-# 2. Devnet mock USDC — proves the SPL path works.
-KEYPAIR=~/.config/solana/test.json TOKEN=USDC AMOUNT=1 RECIPIENT=… pnpm test:pay
-
-# 3. Devnet batch — proves the loop + per-row state.
-KEYPAIR=~/.config/solana/test.json TOKEN=USDC CSV=./scripts/test/sample-roster.csv pnpm test:payroll
-
-# 4. Mainnet smoke — only when devnet is clean.
-RPC_URL=… KEYPAIR=…/mainnet.json CLUSTER=mainnet-beta TOKEN=SOL AMOUNT=0.01 RECIPIENT=… pnpm test:pay
-```
-
-If all four pass: ship.
+Both sender and recipient must be registered with Umbra before any shielded
+payment can be received. Registration is automatic when a wallet connects to
+the app.

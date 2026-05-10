@@ -1,6 +1,6 @@
 import { isAddress } from "@solana/kit";
 
-import { getShieldToken, type ShieldTokenId } from "@/lib/cloak/tokens";
+import { getShieldToken, type ShieldTokenId } from "@/lib/umbra/tokens";
 
 import type { TeamMemberDraft } from "./types";
 

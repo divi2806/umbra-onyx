@@ -11,15 +11,12 @@ import { resolve } from "node:path";
 import {
   Connection,
   Keypair,
-  PublicKey,
   Transaction,
   VersionedTransaction,
 } from "@solana/web3.js";
 import nacl from "tweetnacl";
 
-import {
-  NATIVE_SOL_MINT,
-} from "@cloak.dev/sdk";
+const NATIVE_SOL_MINT_ADDRESS = "So11111111111111111111111111111111111111112";
 
 export type Cluster = "devnet" | "mainnet-beta";
 
@@ -27,14 +24,12 @@ export type TestTokenId = "SOL" | "USDC" | "USDT";
 
 export type ClusterPreset = {
   cluster: Cluster;
-  programId: PublicKey;
-  relayUrl: string;
   defaultRpcUrl: string;
   tokens: Partial<
     Record<
       TestTokenId,
       {
-        mint: PublicKey;
+        mint: string;
         decimals: number;
       }
     >
@@ -44,30 +39,26 @@ export type ClusterPreset = {
 export const CLUSTERS: Record<Cluster, ClusterPreset> = {
   devnet: {
     cluster: "devnet",
-    programId: new PublicKey("Zc1kHfp4rajSMeASFDwFFgkHRjv7dFQuLheJoQus27h"),
-    relayUrl: "https://api.devnet.cloak.ag",
     defaultRpcUrl: "https://api.devnet.solana.com",
     tokens: {
-      SOL: { mint: NATIVE_SOL_MINT, decimals: 9 },
+      SOL: { mint: NATIVE_SOL_MINT_ADDRESS, decimals: 9 },
       USDC: {
-        mint: new PublicKey("61ro7AExqfk4dZYoCyRzTahahCC2TdUUZ4M5epMPunJf"),
+        mint: "61ro7AExqfk4dZYoCyRzTahahCC2TdUUZ4M5epMPunJf",
         decimals: 6,
       },
     },
   },
   "mainnet-beta": {
     cluster: "mainnet-beta",
-    programId: new PublicKey("zh1eLd6rSphLejbFfJEneUwzHRfMKxgzrgkfwA6qRkW"),
-    relayUrl: "https://api.cloak.ag",
     defaultRpcUrl: "https://api.mainnet-beta.solana.com",
     tokens: {
-      SOL: { mint: NATIVE_SOL_MINT, decimals: 9 },
+      SOL: { mint: NATIVE_SOL_MINT_ADDRESS, decimals: 9 },
       USDC: {
-        mint: new PublicKey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"),
+        mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
         decimals: 6,
       },
       USDT: {
-        mint: new PublicKey("Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"),
+        mint: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
         decimals: 6,
       },
     },
