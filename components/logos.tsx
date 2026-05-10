@@ -1,4 +1,5 @@
 import * as React from "react";
+import Image from "next/image";
 
 import { cn } from "@/lib/utils";
 
@@ -17,12 +18,15 @@ function PublicLogo({
   title?: string;
 }) {
   return (
-    <img
+    <Image
       src={src}
       alt={title ?? ""}
       aria-hidden={title ? undefined : true}
+      width={24}
+      height={24}
       className={cn("size-6", className)}
       draggable={false}
+      unoptimized
     />
   );
 }
@@ -51,7 +55,7 @@ export function BackpackLogo(props: LogoProps) {
 }
 
 // Kept inline (not sourced from `public/`).
-export function CloakLogo({ className, title, ...props }: LogoProps) {
+export function UmbraLogo({ className, title, ...props }: LogoProps) {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -106,9 +110,6 @@ export function OnyxMark({ className, title, ...props }: LogoProps) {
   );
 }
 
-/** @deprecated use OnyxMark */
-export const NoriMark = OnyxMark;
-
 export const PROTOCOL_LOGOS = {
   solana: { name: "Solana", Logo: SolanaLogo },
   usdc: { name: "USDC", Logo: UsdcLogo },
@@ -116,8 +117,7 @@ export const PROTOCOL_LOGOS = {
   phantom: { name: "Phantom", Logo: PhantomLogo },
   solflare: { name: "Solflare", Logo: SolflareLogo },
   backpack: { name: "Backpack", Logo: BackpackLogo },
-  cloak: { name: "Cloak", Logo: CloakLogo },
+  umbra: { name: "Umbra", Logo: UmbraLogo },
 } as const;
 
 export type ProtocolId = keyof typeof PROTOCOL_LOGOS;
-
