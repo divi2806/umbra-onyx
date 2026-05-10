@@ -7,14 +7,12 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:pay": "tsx scripts/test/pay.ts",
-    "test:faucet": "tsx scripts/test/faucet.ts",
-    "test:payroll": "tsx scripts/test/payroll.ts"
+    "test:faucet": "tsx scripts/test/faucet.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",
-    "@cloak.dev/sdk": "^0.1.6",
-    "@cloak.dev/sdk-devnet": "0.1.5-devnet.1",
+    "@umbra-privacy/sdk": "^3.0.0",
+    "@umbra-privacy/web-zk-prover": "^2.0.1",
     "@hugeicons/core-free-icons": "^4.1.1",
     "@hugeicons/react": "^1.1.6",
     "@solana-program/system": "^0.7.0",

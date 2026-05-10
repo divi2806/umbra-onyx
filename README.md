@@ -2,189 +2,200 @@
 
 **Confidential payment infrastructure for onchain teams.**
 
-Onyx makes it possible to pay contributors, vendors, and contractors on Solana without publishing amounts, recipients, or schedules on the public ledger — while keeping full audit-ready records for the people you choose.
+Onyx lets Solana teams send payroll, invoices, vendor payments, and treasury transfers through Umbra shielded UTXOs so payment amounts and recipients are not exposed on the public ledger.
 
-- **Website:** [Onyx](https://onyx-red.vercel.app/)
-
----
-
-## The problem
-
-Every SOL, USDC, and USDT transfer on Solana is permanently public. Any wallet that pays a contractor, runs a treasury rebalance, or runs weekly payroll is creating a permanent, indexed record of salaries, vendor rates, and financial strategy. Competitors, recruits, and MEV bots can all read it.
-
-Privacy on Solana has historically required either custodial trust (hand your funds to a mixer) or complex operational work. Onyx removes both barriers.
-
-**Who Onyx is for:**
-- DAOs and protocols running contributor payroll (10–200+ recipients)
-- Treasury teams executing buybacks, rebalances, or grant programs
-- Founders paying contractors whose rates should stay off public dashboards
-- Finance leads who need a full audit trail without exposing it to everyone
+- **Frontend:** https://onyx-red.vercel.app/
+- **Integration details:** [integration.md](integration.md)
+- **Architecture:** [architecture.md](architecture.md)
 
 ---
 
-## How Onyx uses the Cloak SDK
+## The Problem
 
-Onyx is built entirely on [Cloak](https://docs.cloak.ag) — a UTXO-based shielded pool on Solana with Groth16 zero-knowledge proofs. The Cloak SDK (`@cloak.dev/sdk`) is not an optional dependency — it is the entire privacy layer.
+Every normal SOL, USDC, or USDT transfer on Solana is public forever. Payroll runs, contractor rates, vendor bills, treasury movements, and recurring team payments can be indexed by competitors, recruiters, bots, and anyone watching the chain.
 
-### What Cloak provides
+Onyx solves this by giving teams a non-custodial payment workflow where funds move through Umbra's privacy layer while the team keeps local, shareable audit records.
 
-| Primitive | SDK function | What Onyx uses it for |
-|---|---|---|
-| Shielded deposit | `transact()` | Moving funds into the ZK pool |
-| Shielded withdrawal | `fullWithdraw()` | Delivering funds to a recipient's wallet |
-| UTXO keypairs | `generateUtxoKeypair()` | Creating ephemeral shielded notes |
-| Viewing key derivation | `generateCloakKeys()` + `expandSpendKey()` | Deriving the NK from a wallet signature |
-| Relay registration | `registerViewingKey()` | Registering the NK so chain notes are encrypted for the user |
-| Compliance scan | `scanTransactions()` | Scanning the shielded pool with a viewing key |
-| CSV export | `formatComplianceCsv(toComplianceReport())` | Producing audit-ready reports |
+## Target Users And Use Cases
 
-### Privacy model
+**Target users**
 
-A payment is never a direct account-to-account transfer. Every send goes through a two-phase ZK flow:
+- DAOs and protocols paying contributors.
+- Founders and finance teams paying contractors or vendors.
+- Treasury operators making private rebalances, grants, or buybacks.
+- Auditors or internal finance reviewers who need bounded access to payment records.
 
-1. **Deposit.** The sender calls `transact()` with `externalAmount > 0`. A Groth16 proof is generated in the browser, verified on-chain, and a new shielded UTXO is added to the Merkle tree.
-2. **Withdraw.** The SDK calls `fullWithdraw()` with `externalAmount < 0`. A second proof delivers funds to the recipient's ATA. On-chain, both steps are opaque — amounts, sender, and recipient are not revealed.
+**Use cases**
 
-The on-chain Cloak program (`zh1eLd6r…6qRkW` on mainnet, `Zc1kHfp4…us27h` on devnet) verifies every proof, appends commitments to a 32-deep Merkle tree, and records nullifiers to prevent double-spending.
-
-### Viewing key model (Scoped Compliance — Feature #1)
-
-Onyx derives each user's viewing key (NK) from a deterministic wallet signature:
-
-```
-wallet.signMessage(SIGN_IN_MESSAGE)
-  → generateCloakKeys(signature)
-  → expandSpendKey(keys.spend.sk_spend)
-  → nsk  ← this is the NK
-```
-
-The NK is registered with the Cloak relay via `registerViewingKey()`, which causes the relay to write chain notes encrypted to that NK for every future transaction by this wallet. The same NK is then used as `viewingKeyNk` in `scanTransactions()` to decrypt those notes during compliance scans.
-
-**Scoped keys:** The NK is always the same for a given wallet. Scoping is implemented at the app layer — a shareable token encodes `{ nk, from, to, wallet }` as base64. When the auditor scans, the API passes `afterTimestamp`/`beforeTimestamp` directly to `scanTransactions()`, so only transactions in the authorised date range are returned. Revocation works by removing the token from the issuer's local store — the auditor can no longer produce new scans.
+- Single private send from `/pay`.
+- Batch payroll from `/payroll`.
+- Saved recipient roster and payment schedules from `/team`.
+- Invoice requests from `/invoice` and payer flow from `/claim`.
+- Received-payment scanning, claim, and withdrawal from `/history`.
+- Date-scoped audit access from `/compliance` and auditor review from `/audit`.
 
 ---
 
-## Current network
+## How Onyx Uses The Umbra SDK
 
-By default the app runs on **devnet**.
+Onyx uses `@umbra-privacy/sdk` and `@umbra-privacy/web-zk-prover` as the privacy layer. The app does not deploy a custom payment program; it composes Umbra's deployed Solana programs, indexer, relayer, registration, scanner, prover, UTXO, claim, and withdrawal APIs.
 
-| Network | Program ID | Relay |
-|---|---|---|
-| Devnet (default) | `Zc1kHfp4rajSMeASFDwFFgkHRjv7dFQuLheJoQus27h` | `https://api.devnet.cloak.ag` |
-| Mainnet | `zh1eLd6rSphLejbFfJEneUwzHRfMKxgzrgkfwA6qRkW` | `https://api.cloak.ag` |
+| Umbra SDK capability | Onyx usage |
+|---|---|
+| `getUmbraClient` | Creates a wallet-bound Umbra client with RPC, WebSocket, indexer, transaction forwarder, and computation monitor configuration. |
+| `getUserRegistrationFunction` | Performs one-time confidential and anonymous registration so wallets can receive shielded UTXOs. |
+| `getPublicBalanceToReceiverClaimableUtxoCreatorFunction` | Sends public wallet funds into a receiver-claimable Umbra UTXO for private payments. |
+| `getClaimableUtxoScannerFunction` | Scans Umbra Merkle trees for UTXOs the connected wallet can claim. |
+| `getReceiverClaimableUtxoToEncryptedBalanceClaimerFunction` | Claims receiver UTXOs into Umbra encrypted balance through the Umbra relayer. |
+| `getEncryptedBalanceToPublicBalanceDirectWithdrawerFunction` | Withdraws encrypted balance back to the receiver's public wallet. |
+| Umbra viewing key derivation | Powers Onyx audit access keys, which are date-scoped read-only tokens for auditors. |
 
-To switch to mainnet, add to `.env.local`:
+Important Umbra implementation files:
 
-```
-NEXT_PUBLIC_SOLANA_CLUSTER=mainnet-beta
-NEXT_PUBLIC_SOLANA_RPC_URL=https://your-helius-or-quicknode-rpc-url
+- `lib/umbra/client.tsx` - Umbra client provider, registration helper, random generation index helper, custom transaction forwarder.
+- `lib/umbra/umbra-send-core.ts` - single send orchestration.
+- `lib/umbra/use-claim-utxo.ts` - scan, claim into encrypted balance, and withdraw.
+- `lib/umbra/use-scanned-history.ts` - received UTXO scan/cache hook.
+- `lib/umbra/viewing-keys.ts` - audit access key storage and token encode/decode.
+- `lib/umbra/tokens.ts` - Umbra-supported token registry by network.
+
+---
+
+## Network Switching
+
+Users can switch between **Mainnet** and **Devnet** from the network selector in the app header. The selector stores the choice in local browser storage and reloads Onyx so the Solana wallet connection, RPC endpoint, Umbra client, indexer, relayer, token registry, and local records all use the selected network.
+
+The local override key is:
+
+```text
+onyx:solana-cluster:v1
 ```
 
----
+Default network is `devnet` unless `NEXT_PUBLIC_SOLANA_CLUSTER` is set.
 
-## Features
+| Network | Solana cluster | Umbra program ID | Indexer | Relayer |
+|---|---|---|---|---|
+| Mainnet | `mainnet-beta` | `UMBRAD2ishebJTcgCLkTkNUx1v3GyoAgpTRPeWoLykh` | `https://utxo-indexer.api.umbraprivacy.com` | `https://relayer.api.umbraprivacy.com` |
+| Devnet | `devnet` | `DSuKkyqGVGgo4QtPABfxKJKygUDACbUhirnuv63mEpAJ` | `https://utxo-indexer.api-devnet.umbraprivacy.com` | `https://relayer.api-devnet.umbraprivacy.com` |
 
-### Working today
-
-| Feature | Route | Description |
-|---|---|---|
-| Private send | `/pay` | Single-recipient shielded transfer. Groth16 proof generated in browser. |
-| Batch payroll | `/payroll` | Multi-recipient disbursement via CSV. Each row is an independent shielded tx. |
-| Team management | `/team` | Persistent recipient list with recurring payment schedules. |
-| Payment ledger | `/history` | Full local history of outbound transfers. |
-| Scoped viewing keys | `/compliance` | Derive NK → register with relay → issue date-scoped tokens for auditors. |
-| Audit portal | `/audit` | Stateless auditor page: paste token → scan blockchain → view report → download CSV. |
-| Invoice links | `/invoice` | Create shareable `/claim?v=…` links for privacy-preserving payment requests. |
-| Claim page | `/claim` | Payer visits link, connects wallet, pays through the shielded pool. |
+Mainnet supports SOL/wSOL, USDC, USDT, and UMBRA through Umbra. Devnet currently supports SOL/wSOL only in this app.
 
 ---
 
-## Setup and running locally
+## Audit Access Keys
+
+The old "compliance key" wording is now represented in the app as an **Audit access key**. Technically, it is an Umbra viewing-key-based token plus a scoped snapshot of locally synced received UTXOs.
+
+What the wallet holder does:
+
+1. Open `/history` and sync received payments so Onyx has the latest received UTXO rows.
+2. Open `/compliance`, choose an auditor label and date range, then generate an audit access key.
+3. Copy the generated token and send it to the auditor through their normal secure channel.
+
+What the auditor does with the key:
+
+1. Open `/audit`.
+2. Paste the audit access token.
+3. Run the audit scan.
+4. Review the date-bounded payment rows and download the CSV report.
+
+What the key can and cannot do:
+
+- It can reveal only the included date-scoped audit snapshot.
+- It can help an auditor verify received-payment records for the selected wallet and period.
+- It cannot spend funds, claim UTXOs, withdraw balances, or control the wallet.
+- Archiving a key removes it from the issuer's current browser storage, but already-shared snapshot tokens cannot be recalled.
+
+---
+
+## Build, Test, And Run
 
 ### Prerequisites
 
-- Node 18+
-- pnpm (`npm install -g pnpm`)
+- Node.js 18+
+- pnpm
+- A Solana wallet such as Phantom, Solflare, or Backpack
 
 ### Install
 
 ```bash
-git clone <repo>
-cd onyx
+git clone <repo-url>
+cd nori-main
 pnpm install
 ```
 
-### Environment (optional)
+### Environment
 
-Create `.env.local` to override defaults:
+Onyx runs on devnet by default. Create `.env.local` only when overriding defaults:
 
 ```env
-# Network (default: devnet)
+# Default network if the user has not selected one in the app.
 NEXT_PUBLIC_SOLANA_CLUSTER=devnet
 
-# RPC endpoint — use Helius or QuickNode for production
+# Optional generic RPC override for the default env-selected network.
 NEXT_PUBLIC_SOLANA_RPC_URL=https://api.devnet.solana.com
+NEXT_PUBLIC_SOLANA_WS_URL=wss://api.devnet.solana.com
 
-# Relay (defaults come from the SDK config, no override needed for standard use)
-# NEXT_PUBLIC_CLOAK_RELAY_URL=https://api.devnet.cloak.ag
-
-# Server-side RPC for scanning (isolates scan load from client RPC credits)
-# CLOAK_SCAN_RPC_URL=https://your-server-rpc
+# Optional per-network RPC overrides used by the one-click selector.
+NEXT_PUBLIC_SOLANA_DEVNET_RPC_URL=https://api.devnet.solana.com
+NEXT_PUBLIC_SOLANA_DEVNET_WS_URL=wss://api.devnet.solana.com
+NEXT_PUBLIC_SOLANA_MAINNET_RPC_URL=https://your-mainnet-rpc.example
+NEXT_PUBLIC_SOLANA_MAINNET_WS_URL=wss://your-mainnet-rpc.example
 ```
 
-### Run
+### Run locally
 
 ```bash
-pnpm dev      # http://localhost:3000
-pnpm build    # production bundle
-pnpm start    # serve production build
-pnpm lint     # ESLint
+pnpm dev
 ```
+
+Open `http://localhost:3000`.
+
+### Build and verification commands
+
+```bash
+pnpm build
+pnpm lint
+pnpm test:faucet
+```
+
+`pnpm test:faucet` is a devnet helper script for funding a test wallet. There is no broad automated test suite yet; most Umbra flows are currently verified manually with wallet interaction on devnet or mainnet.
+
+### Using the application
+
+1. Open Onyx and choose Mainnet or Devnet from the header network selector.
+2. First-time visitors see a walkthrough modal that explains private sends, network selection, Umbra registration, claiming, and audit access.
+3. Connect a Solana wallet.
+4. Wait for Umbra registration to finish if this is the wallet's first use.
+5. Use `/pay` for a private transfer or `/payroll` for CSV batch payments.
+6. Use `/invoice` to create a payment request link and `/claim` to pay an invoice.
+7. Use `/history` to scan received UTXOs, claim, and withdraw.
+8. Use `/compliance` to issue audit access keys and `/audit` to inspect an audit token.
 
 ---
 
-## Architecture
+## Deployment And Program IDs
 
-```
-app/
-  (app)/          ← Sidebar layout, wallet-gated routes
-    pay/          ← Single private send
-    payroll/      ← Batch payroll (CSV)
-    team/         ← Recipient management
-    history/      ← Payment ledger
-    compliance/   ← Viewing key generation + management
-    invoice/      ← Create claim links
-  audit/          ← Public auditor portal (no wallet required)
-  claim/          ← Public payer page (wallet required to pay)
-  api/
-    scan-received/  ← Server-side scanTransactions() endpoint
+Onyx currently uses Umbra's deployed Solana programs and does not ship an Onyx-owned Solana program.
 
-lib/
-  cloak/
-    config.ts           ← Program IDs and relay URLs per cluster
-    derive-nk.ts        ← SIGN_IN_MESSAGE → generateCloakKeys → expandSpendKey → NK
-    fast-send-core.ts   ← transact() + fullWithdraw() orchestration
-    use-batch-payroll.ts← Batch payroll hook
-    viewing-keys.ts     ← Viewing key localStorage CRUD + token encode/decode
-    use-viewing-keys.ts ← useSyncExternalStore hook for viewing keys
-    invoice.ts          ← Invoice localStorage CRUD + claim link encode/decode
-    tokens.ts           ← SOL/USDC/USDT mint registry per cluster
-  solana/
-    config.ts     ← Cluster + RPC URL from env
-    providers.tsx ← WalletProvider + ConnectionProvider
-```
+| Item | Value |
+|---|---|
+| Frontend | https://onyx-red.vercel.app/ |
+| Umbra mainnet program | `UMBRAD2ishebJTcgCLkTkNUx1v3GyoAgpTRPeWoLykh` |
+| Umbra devnet program | `DSuKkyqGVGgo4QtPABfxKJKygUDACbUhirnuv63mEpAJ` |
 
 ---
 
 ## Stack
 
-- **Next.js 16** (App Router, Turbopack) + React 19
-- **TypeScript 5** strict
-- **`@cloak.dev/sdk`** — shielded UTXO transactions, ZK proof generation, compliance scanning
-- **`@solana/web3.js`** + `@solana/wallet-adapter-react` — RPC connection, wallet signing
-- **Tailwind CSS 4** + shadcn/ui + Base UI primitives
-- **Framer Motion** (`motion/react`) for page and component transitions
-- **Hugeicons** (`@hugeicons/core-free-icons`) icon set
+- Next.js 16 App Router and React 19
+- TypeScript 5
+- Tailwind CSS 4 and local UI components
+- `@solana/web3.js`, `@solana/kit`, and wallet adapter packages
+- `@umbra-privacy/sdk`
+- `@umbra-privacy/web-zk-prover`
+- Framer Motion via `motion/react`
+- Hugeicons
 
 ---
 
