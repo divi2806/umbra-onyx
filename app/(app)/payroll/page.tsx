@@ -22,17 +22,17 @@ import { FancyButton } from "@/components/ui/fancy-button";
 import {
   appendPayment,
   formatBaseUnits,
-} from "@/lib/cloak/payment-history";
+} from "@/lib/umbra/payment-history";
 import {
   getShieldToken,
   isShieldTokenSupported,
   type ShieldTokenId,
-} from "@/lib/cloak/tokens";
+} from "@/lib/umbra/tokens";
 import {
   useBatchPayroll,
   type BatchRowState,
   type BatchRowStatus,
-} from "@/lib/cloak/use-batch-payroll";
+} from "@/lib/umbra/use-batch-payroll";
 import {
   parsePayrollCsv,
   type PayrollParseResult,
@@ -43,6 +43,7 @@ import {
   validateRows,
   type ValidatedRow,
 } from "@/lib/payroll/validate";
+import { useUmbraClientState } from "@/lib/umbra/client";
 import { solanaConfig } from "@/lib/solana/config";
 import { solscanTxUrl } from "@/lib/solana/explorer";
 import { useDueMembers } from "@/lib/team/use-due-members";
@@ -244,6 +245,8 @@ function ParsedSummary({
   const tokenSupported = isShieldTokenSupported(tokenId);
   const wallet = useWallet();
   const batch = useBatchPayroll();
+  const umbraStatus = useUmbraClientState().status;
+  const clientReady = umbraStatus === "ready";
 
   const validated: ValidatedRow[] = React.useMemo(() => {
     if (state.kind !== "ready" || !shieldToken) return [];
@@ -258,22 +261,23 @@ function ParsedSummary({
     batch.status === "idle" &&
     tokenSupported &&
     wallet.connected &&
+    clientReady &&
     totals.validCount > 0;
 
   const runLabel =
     batch.status === "running"
-      ? batch.phase === "depositing-proof"
-        ? `Shielding · ${Math.round(batch.depositPercent)}%`
-        : batch.phase === "depositing-submit"
-          ? "Submitting deposit"
-          : `Paying ${runProgress(batch.rows)}`
+      ? batch.phase === "paying"
+        ? `Paying ${runProgress(batch.rows)}`
+        : "Processing…"
       : batch.status === "done"
         ? "Run complete"
         : !wallet.connected
           ? "Connect wallet to run"
-          : totals.validCount === 0
-            ? "No valid rows"
-            : `Run payroll (${totals.validCount})`;
+          : !clientReady
+            ? "Registering with Umbra…"
+            : totals.validCount === 0
+              ? "No valid rows"
+              : `Run payroll (${totals.validCount})`;
 
   const onRun = React.useCallback(async () => {
     if (!shieldToken || !wallet.publicKey) return;
@@ -286,7 +290,7 @@ function ParsedSummary({
         recipient: r.wallet,
         amountBaseUnits: r.amountBaseUnits!,
       })),
-      mint: shieldToken.mint,
+      mint: shieldToken.mint as string,
       tokenId,
       decimals: shieldToken.decimals,
     });
@@ -294,26 +298,25 @@ function ParsedSummary({
     if (!outcome || !wallet.publicKey) return;
 
     const sender = wallet.publicKey.toBase58();
-    for (const result of outcome.results) {
-      if (!result.ok) continue;
-      const r = validById.get(result.id);
+    const batchId = outcome.firstSignature ?? `batch_${Date.now()}`;
+    for (const [rowId, exec] of Object.entries(batch.rows)) {
+      if (exec.status !== "confirmed" || !exec.createUtxoSignature) continue;
+      const r = validById.get(Number(rowId));
       if (!r) continue;
-      // The whole batch shares one deposit; each row has its own payout sig.
-      // Use payoutSig as the record id so /history shows N distinct rows.
       appendPayment(sender, solanaConfig.cluster, {
-        id: result.payoutSig,
+        id: exec.createUtxoSignature,
         cluster: solanaConfig.cluster,
         sender,
         recipient: r.wallet,
         token: tokenId,
-        mint: shieldToken.mint.toBase58(),
+        mint: shieldToken.mint as string,
         decimals: shieldToken.decimals,
         amountRaw: r.amountBaseUnits!.toString(),
         netRaw: r.netBaseUnits!.toString(),
-        depositSignature: outcome.depositSignature,
-        withdrawSignature: result.payoutSig,
+        depositSignature: exec.createUtxoSignature,
+        withdrawSignature: exec.createUtxoSignature,
         timestamp: Date.now(),
-        batchId: outcome.depositSignature,
+        batchId,
         source: "payroll",
       });
     }
@@ -491,15 +494,14 @@ function ParsedSummary({
               />
             </FancyButton>
 
-            {(batch.phase === "depositing-proof" ||
-              batch.phase === "depositing-submit") && (
+            {batch.phase === "paying" && batch.activeRowId !== null && (
               <span className="inline-flex items-center gap-2 text-[12px] text-muted-foreground">
                 <span className="relative flex size-1.5">
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/40" />
                   <span className="relative inline-flex size-1.5 rounded-full bg-primary" />
                 </span>
                 <span className="truncate">
-                  {batch.depositProgress ?? "Shielding into pool"}
+                  {batch.rows[batch.activeRowId]?.progress ?? "Generating proof…"}
                 </span>
               </span>
             )}
@@ -533,7 +535,7 @@ function Receipt({
     failed: number;
     startedAt: number;
     finishedAt: number;
-    depositSignature: string | null;
+    firstSignature: string | null;
   };
   validated: ValidatedRow[];
   execRows: Record<number, BatchRowState>;
@@ -588,16 +590,16 @@ function Receipt({
           <p className="mt-1 font-mono text-[11px] text-muted-foreground">
             Total: <span className="text-foreground/70">[redacted]</span>
           </p>
-          {summary.depositSignature && (
+          {summary.firstSignature && (
             <p className="mt-1 text-[11px] text-muted-foreground">
-              Batch deposit:{" "}
+              First UTXO:{" "}
               <a
-                href={solscanTxUrl(summary.depositSignature)}
+                href={solscanTxUrl(summary.firstSignature)}
                 target="_blank"
                 rel="noreferrer"
                 className="font-mono text-foreground/80 underline underline-offset-2"
               >
-                {shortSig(summary.depositSignature)} ↗
+                {shortSig(summary.firstSignature)} ↗
               </a>
             </p>
           )}
@@ -660,15 +662,15 @@ function Receipt({
                       )}
                     </td>
                     <td className="px-3 py-2 text-right">
-                      {isConfirmed && exec?.payoutSignature ? (
+                      {isConfirmed && exec?.createUtxoSignature ? (
                         <a
-                          href={solscanTxUrl(exec.payoutSignature)}
+                          href={solscanTxUrl(exec.createUtxoSignature)}
                           target="_blank"
                           rel="noreferrer"
                           className="inline-flex items-center gap-1 rounded-lg border border-border bg-card/60 px-2 py-1 text-[11px] text-foreground transition-colors hover:bg-secondary"
-                          title="Open payout on Solscan"
+                          title="Open UTXO transaction on Solscan"
                         >
-                          <span>{shortSig(exec.payoutSignature)}</span>
+                          <span>{shortSig(exec.createUtxoSignature)}</span>
                           <span aria-hidden="true">↗</span>
                         </a>
                       ) : (
@@ -897,9 +899,6 @@ function RowStatus({
     >
       <span className="size-1.5 animate-pulse rounded-full bg-primary" />
       {phaseShort(exec.status)}
-      {exec.proofPercent !== null && exec.status === "paying-proof" && (
-        <span className="font-mono">{Math.round(exec.proofPercent)}%</span>
-      )}
       {elapsedSec !== null && (
         <span className="font-mono text-primary/70">{elapsedSec}s</span>
       )}
