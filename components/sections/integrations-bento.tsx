@@ -108,7 +108,7 @@ function ComplianceWidget() {
       <div className="relative overflow-hidden rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/[0.08] to-primary/[0.02] p-4 backdrop-blur-md">
         <div className="absolute -right-4 -top-4 size-24 rounded-full bg-primary/20 blur-2xl" />
         <div className="relative flex items-center justify-between">
-          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-primary/60">Viewing key</span>
+          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-primary/60">Audit key</span>
           <span className="flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[9px] font-semibold text-emerald-400">
             <span className="size-1.5 animate-pulse rounded-full bg-emerald-400 shadow-[0_0_4px_currentColor]" />
             Active
@@ -180,7 +180,7 @@ const PRIMARY: PrimaryDef[] = [
   {
     eyebrow: "03 · Compliance",
     title: "Auditors see\nwhat you choose.",
-    body: "Issue a scoped viewing key tied to a date range. Your auditor gets a structured CSV report. The public ledger sees nothing.",
+    body: "Issue an audit access key tied to a date range. Your auditor gets a structured CSV report. The public ledger sees nothing.",
     icon: KeyIcon,
     stat: { value: "0", label: "on-chain leaks" },
     tags: ["Scoped keys", "Revocable"],
@@ -480,7 +480,7 @@ export function IntegrationsBento() {
         >
           <span className="flex items-center gap-2.5 text-white/50">
             <span className="size-2 rounded-full bg-primary shadow-[0_0_8px_oklch(0.68_0.24_285/0.8)]" />
-            Mainnet · zh1eLd6r…6qRkW
+            Mainnet/devnet selectable
           </span>
           <div className="hidden size-1 rounded-full bg-white/10 sm:block" />
           <span>Groth16 proofs · browser-side</span>
@@ -491,4 +491,3 @@ export function IntegrationsBento() {
     </section>
   );
 }
-
