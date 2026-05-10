@@ -7,6 +7,7 @@ import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { FancyButton } from "@/components/ui/fancy-button";
+import { useUmbraClientState } from "@/lib/umbra/client";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -40,6 +41,8 @@ export function ConnectButton() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
 
   const isBusy = connecting || disconnecting;
+  const umbraStatus = useUmbraClientState().status;
+  const isRegistering = umbraStatus === "connecting" || umbraStatus === "registering";
 
   const connectableWallets = useMemo(() => {
     return wallets.filter((w) => w.readyState !== WalletReadyState.Unsupported);
@@ -144,7 +147,14 @@ export function ConnectButton() {
             />
           }
         >
-          {formatPublicKey(address)}
+          {isRegistering ? (
+            <span className="flex items-center gap-1.5">
+              <span className="size-1.5 rounded-full bg-primary animate-pulse" />
+              Registering…
+            </span>
+          ) : (
+            formatPublicKey(address)
+          )}
         </DropdownMenuTrigger>
 
         <DropdownMenuContent sideOffset={8} align="end">
