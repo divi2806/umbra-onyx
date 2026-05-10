@@ -59,8 +59,10 @@ export function isSwitchableSolanaCluster(
 function readBrowserClusterOverride(): SwitchableSolanaCluster | null {
   if (!isBrowser()) return null;
   try {
-    const value = window.localStorage.getItem(SOLANA_CLUSTER_OVERRIDE_STORAGE_KEY);
-    return isSwitchableSolanaCluster(value ?? undefined) ? value : null;
+    const value =
+      window.localStorage.getItem(SOLANA_CLUSTER_OVERRIDE_STORAGE_KEY) ??
+      undefined;
+    return isSwitchableSolanaCluster(value) ? value : null;
   } catch {
     return null;
   }
