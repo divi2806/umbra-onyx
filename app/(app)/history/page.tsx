@@ -11,7 +11,9 @@ import {
   Loading03Icon,
   Refresh01Icon,
   Search01Icon,
+  Tick01Icon,
   UserMultipleIcon,
+  WalletAdd02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { motion } from "motion/react";
@@ -37,16 +39,20 @@ import {
   migratePaymentRecords,
   type PaymentRecord,
   type PaymentSource,
-} from "@/lib/cloak/payment-history";
-import type {
-  ReceivedTransaction,
-  StoredScan,
-} from "@/lib/cloak/scanned-history";
-import { usePaymentHistory } from "@/lib/cloak/use-payment-history";
+} from "@/lib/umbra/payment-history";
+import {
+  markReceivedUtxosClaimState,
+  receivedUtxoKey,
+  type ReceivedUtxo,
+  type StoredScan,
+} from "@/lib/umbra/scanned-history";
+import { usePaymentHistory } from "@/lib/umbra/use-payment-history";
 import {
   useScannedHistory,
   type ScanStatus,
-} from "@/lib/cloak/use-scanned-history";
+} from "@/lib/umbra/use-scanned-history";
+import { useUmbraClientState } from "@/lib/umbra/client";
+import { useClaimUtxos, type ClaimStatus } from "@/lib/umbra/use-claim-utxo";
 import { solanaConfig } from "@/lib/solana/config";
 import { solscanTxUrl } from "@/lib/solana/explorer";
 import { cn } from "@/lib/utils";
@@ -54,7 +60,7 @@ import { cn } from "@/lib/utils";
 type Group =
   | { kind: "single"; record: PaymentRecord }
   | { kind: "batch"; batchId: string; records: PaymentRecord[] }
-  | { kind: "received"; tx: ReceivedTransaction };
+  | { kind: "received"; tx: ReceivedUtxo };
 
 type FilterId = "all" | PaymentSource | "received";
 
@@ -86,6 +92,8 @@ export default function HistoryPage() {
   const [toDate, setToDate] = React.useState<string>("");
   const wallet = useWallet();
   const sender = wallet.publicKey?.toBase58() ?? null;
+  const umbraStatus = useUmbraClientState().status;
+  const clientReady = umbraStatus === "ready";
 
   // One-time backfill per (wallet, cluster). Tags legacy records with a
   // `source` and coerces stringly-typed numeric fields so BigInt parsing
@@ -94,11 +102,6 @@ export default function HistoryPage() {
     if (!sender) return;
     migratePaymentRecords(sender, solanaConfig.cluster);
   }, [sender]);
-
-  // Reset to first page whenever the visible result set changes shape.
-  React.useEffect(() => {
-    setPage(0);
-  }, [filter, query, fromDate, toDate]);
 
   // Parse the date inputs once per render. `toDate` is treated as
   // inclusive — add 24h so the end-of-day boundary works as users expect.
@@ -156,6 +159,23 @@ export default function HistoryPage() {
   const emptyForFilter =
     ready && records.length + received.length > 0 && visibleSourceCount === 0;
 
+  const {
+    claimAndWithdraw,
+    status: claimStatus,
+    progress: claimProgress,
+    error: claimError,
+    claimedCount,
+    withdrawnCount,
+    successHint: claimSuccessHint,
+    reset: resetClaim,
+  } = useClaimUtxos();
+
+  const isClaimBusy = claimStatus === "scanning"
+    || claimStatus === "proving"
+    || claimStatus === "claiming"
+    || claimStatus === "querying"
+    || claimStatus === "withdrawing";
+
   const handleSync = React.useCallback(() => {
     runScan().catch(() => {
       // Error already surfaced via scanError.
@@ -168,7 +188,31 @@ export default function HistoryPage() {
     });
   }, [resetScan]);
 
+  const handleClaim = React.useCallback(() => {
+    const targetReceivedIds = received.map(receivedUtxoKey);
+    claimAndWithdraw()
+      .then(async (outcome) => {
+        // Full refresh so spent nullifiers disappear from the local cache.
+        try {
+          await resetScan();
+        } finally {
+          if (sender && outcome.receivedState && targetReceivedIds.length > 0) {
+            markReceivedUtxosClaimState(
+              sender,
+              solanaConfig.cluster,
+              targetReceivedIds,
+              outcome.receivedState,
+            );
+          }
+        }
+      })
+      .catch(() => {
+        // Error already surfaced via claimError state.
+      });
+  }, [claimAndWithdraw, received, resetScan, sender]);
+
   const clearDateRange = React.useCallback(() => {
+    setPage(0);
     setFromDate("");
     setToDate("");
   }, []);
@@ -199,56 +243,120 @@ export default function HistoryPage() {
       <div className="flex flex-col gap-4 pb-16">
         <BalanceSummary summaries={tokenSummaries} />
 
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <FilterTabs
-            value={filter}
-            onChange={setFilter}
-            counts={sourceCounts}
-            receivedCount={received.length}
-          />
-          <div className="flex items-center gap-2 sm:max-w-md">
-            <div className="flex-1 sm:min-w-[16rem]">
-              <Input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search recipient or signature"
-                leadingIcon={
+        {/* ── Toolbar: filters + search + actions ──────────────────────── */}
+        <div className="flex flex-col gap-2">
+          {/* Row 1: filters on the left, search + buttons on the right */}
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <FilterTabs
+              value={filter}
+              onChange={(next) => {
+                setPage(0);
+                setFilter(next);
+              }}
+              counts={sourceCounts}
+              receivedCount={received.length}
+            />
+
+            <div className="flex min-w-0 items-center gap-2">
+              {/* Search — grows to fill available space */}
+              <div className="min-w-0 flex-1 sm:w-52 sm:flex-none">
+                <Input
+                  value={query}
+                  onChange={(e) => {
+                    setPage(0);
+                    setQuery(e.target.value);
+                  }}
+                  placeholder="Search recipient or signature"
+                  leadingIcon={
+                    <HugeiconsIcon
+                      icon={Search01Icon}
+                      size={14}
+                      strokeWidth={1.8}
+                    />
+                  }
+                />
+              </div>
+
+              {/* Sync button */}
+              <Button
+                type="button"
+                variant="outline"
+                size="default"
+                onClick={handleSync}
+                disabled={scanStatus === "scanning" || !sender || !clientReady}
+                title={
+                  !sender
+                    ? "Connect your wallet to sync received payments"
+                    : !clientReady
+                      ? "Registering with Umbra — please wait"
+                      : "Scan the chain for payments received by this wallet"
+                }
+                className="shrink-0"
+              >
+                <HugeiconsIcon
+                  icon={scanStatus === "scanning" || !clientReady ? Loading03Icon : Refresh01Icon}
+                  size={14}
+                  strokeWidth={1.8}
+                  className={cn((scanStatus === "scanning" || !clientReady) && "animate-spin")}
+                />
+                <span className="hidden sm:inline">
+                  {!clientReady ? "Registering…" : scanStatus === "scanning" ? "Syncing…" : "Sync"}
+                </span>
+              </Button>
+
+              {/* Claim button — visible when there are unclaimed UTXOs or after a claim attempt */}
+              {sender && clientReady && (
+                <Button
+                  type="button"
+                  variant={claimStatus === "success" ? "outline" : "default"}
+                  size="default"
+                  onClick={
+                    claimStatus === "success" || claimStatus === "error"
+                      ? resetClaim
+                      : handleClaim
+                  }
+                  disabled={isClaimBusy || !clientReady || !sender}
+                  title="Claim all received UTXOs and withdraw to your wallet"
+                  className="shrink-0"
+                >
                   <HugeiconsIcon
-                    icon={Search01Icon}
+                    icon={
+                      isClaimBusy
+                        ? Loading03Icon
+                        : claimStatus === "success"
+                          ? Tick01Icon
+                          : WalletAdd02Icon
+                    }
                     size={14}
                     strokeWidth={1.8}
+                    className={cn(isClaimBusy && "animate-spin")}
                   />
-                }
-              />
+                  <span>
+                    {isClaimBusy
+                      ? "Claiming…"
+                      : claimStatus === "success"
+                        ? "Claimed"
+                        : claimStatus === "error"
+                          ? "Retry"
+                          : "Claim"}
+                  </span>
+                </Button>
+              )}
             </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="default"
-              onClick={handleSync}
-              disabled={scanStatus === "scanning" || !sender}
-              title={
-                sender
-                  ? "Scan the chain for payments received by this wallet"
-                  : "Connect your wallet to sync received payments"
-              }
-            >
-              <HugeiconsIcon
-                icon={scanStatus === "scanning" ? Loading03Icon : Refresh01Icon}
-                size={14}
-                strokeWidth={1.8}
-                className={cn(scanStatus === "scanning" && "animate-spin")}
-              />
-              {scanStatus === "scanning" ? "Syncing" : "Sync received"}
-            </Button>
           </div>
         </div>
 
         <DateRangeBar
           from={fromDate}
           to={toDate}
-          onFromChange={setFromDate}
-          onToChange={setToDate}
+          onFromChange={(next) => {
+            setPage(0);
+            setFromDate(next);
+          }}
+          onToChange={(next) => {
+            setPage(0);
+            setToDate(next);
+          }}
           onClear={clearDateRange}
           active={dateActive}
         />
@@ -259,6 +367,16 @@ export default function HistoryPage() {
           progress={scanProgress}
           error={scanError}
           onReset={handleReset}
+        />
+
+        <ClaimStatusBar
+          status={claimStatus}
+          progress={claimProgress}
+          error={claimError}
+          claimedCount={claimedCount}
+          withdrawnCount={withdrawnCount}
+          successHint={claimSuccessHint}
+          onReset={resetClaim}
         />
 
         <ul className="flex flex-col gap-2">
@@ -274,7 +392,7 @@ export default function HistoryPage() {
               />
             ) : (
               <ReceivedRow
-                key={`recv-${g.tx.signature ?? g.tx.commitment}`}
+                key={`recv-${g.tx.treeIndex}-${g.tx.insertionIndex}`}
                 tx={g.tx}
                 index={i}
               />
@@ -561,19 +679,17 @@ function ScanStatusBar({
     );
   }
   if (!scan) return null;
-  const cursor = scan.report.lastSignature
-    ? `${scan.report.lastSignature.slice(0, 4)}…${scan.report.lastSignature.slice(-4)}`
-    : "—";
+  const treeCount = Object.keys(scan.report.nextScanStartIndexByTree).length;
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
       <span>Synced {formatRelative(scan.scannedAt)}</span>
       <span className="text-muted-foreground/60">·</span>
       <span className="font-mono">
-        {scan.report.transactions.length} cached
+        {scan.report.utxos.length} UTXOs cached
       </span>
       <span className="text-muted-foreground/60">·</span>
-      <span className="font-mono" title="Incremental scan cursor (lastSignature)">
-        cursor {cursor}
+      <span className="font-mono" title="Trees scanned">
+        {treeCount} tree{treeCount === 1 ? "" : "s"}
       </span>
       <Button
         type="button"
@@ -586,6 +702,92 @@ function ScanStatusBar({
       </Button>
     </div>
   );
+}
+
+function ClaimStatusBar({
+  status,
+  progress,
+  error,
+  claimedCount,
+  withdrawnCount,
+  successHint,
+  onReset,
+}: {
+  status: ClaimStatus;
+  progress: string | null;
+  error: Error | null;
+  claimedCount: number;
+  withdrawnCount: number;
+  successHint: string | null;
+  onReset: () => void;
+}) {
+  if (status === "idle") return null;
+
+  if (
+    status === "scanning" ||
+    status === "proving" ||
+    status === "claiming" ||
+    status === "querying" ||
+    status === "withdrawing"
+  ) {
+    return (
+      <div className="flex items-center gap-2 text-[11.5px] text-primary">
+        <HugeiconsIcon icon={Loading03Icon} size={11} strokeWidth={2} className="animate-spin shrink-0" />
+        <span className="min-w-0 truncate" title={progress ?? undefined}>
+          {progress ?? "Processing claim…"}
+        </span>
+      </div>
+    );
+  }
+
+  if (status === "error" && error) {
+    return (
+      <p className="text-[11.5px] text-destructive">
+        Claim failed: {error.message}
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
+          onClick={onReset}
+          className="ml-2 font-mono uppercase tracking-[0.14em]"
+        >
+          Dismiss
+        </Button>
+      </p>
+    );
+  }
+
+  if (status === "success") {
+    const summary =
+      successHint
+        ?? (withdrawnCount > 0 && claimedCount === 0
+          ? `Withdrew to your wallet (${withdrawnCount} token type${withdrawnCount !== 1 ? "s" : ""}). Balance may show as wSOL — same value as SOL.`
+          : claimedCount === 0
+            ? "No unclaimed UTXOs found."
+            : `${claimedCount} UTXO${claimedCount !== 1 ? "s" : ""} claimed${withdrawnCount > 0 ? " and withdrawn to your wallet" : ""}.`);
+    return (
+      <div
+        className={cn(
+          "flex items-center gap-2 text-[11.5px]",
+          successHint && withdrawnCount === 0 ? "text-amber-400/90" : "text-emerald-400",
+        )}
+      >
+        <HugeiconsIcon icon={Tick01Icon} size={11} strokeWidth={2.5} className="shrink-0" />
+        <span className="min-w-0">{summary}</span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
+          onClick={onReset}
+          className="font-mono uppercase tracking-[0.14em]"
+        >
+          Dismiss
+        </Button>
+      </div>
+    );
+  }
+
+  return null;
 }
 
 function formatRelative(ms: number): string {
@@ -607,7 +809,7 @@ type TokenSummary = {
 
 function summarizeByToken(
   records: PaymentRecord[],
-  received: ReceivedTransaction[],
+  received: ReceivedUtxo[],
 ): TokenSummary[] {
   const map = new Map<string, TokenSummary>();
 
@@ -650,15 +852,13 @@ function summarizeByToken(
   }
 
   for (const tx of received) {
-    // For swaps, attribute the inflow to the output mint the user actually
-    // received. For deposits / withdraws / transfers, fall back to `mint`.
-    const mint = (tx.outputMint ?? tx.mint ?? "").trim();
+    const mint = tx.mint.trim();
     if (!mint) continue;
-    const symbol = (tx.outputSymbol ?? tx.symbol ?? "").trim();
-    const decimals = tx.decimals ?? 9;
+    const symbol = tx.symbol.trim();
+    const decimals = tx.decimals;
     const e = upsert(mint, symbol, decimals);
     try {
-      e.inflow += BigInt(String(tx.netAmount));
+      e.inflow += BigInt(tx.amount);
     } catch {
       // ignore
     }
@@ -736,8 +936,8 @@ function shortMint(mint: string): string {
   return `${mint.slice(0, 4)}…${mint.slice(-4)}`;
 }
 
-// Bundled token logos. Cloak's mock-USDC on devnet shares the USDC logo so
-// the dashboard reads the same across clusters.
+// Bundled token logos. Umbra devnet uses the same USDC mint address pattern,
+// so the dashboard renders the same logo across clusters.
 const NATIVE_SOL = "So11111111111111111111111111111111111111112";
 const USDC_MINTS = new Set<string>([
   "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", // mainnet USDC
@@ -807,24 +1007,9 @@ function TypeChip({ children }: { children: React.ReactNode }) {
   );
 }
 
-function txTypeLabel(txType: string): string {
-  switch (txType) {
-    case "deposit":
-      return "Deposit";
-    case "withdraw":
-      return "Withdraw";
-    case "transfer":
-      return "Transfer";
-    case "swap":
-      return "Swap";
-    default:
-      return "Unknown";
-  }
-}
-
 function buildGroups(
   records: PaymentRecord[],
-  received: ReceivedTransaction[],
+  received: ReceivedUtxo[],
   filter: FilterId,
 ): Group[] {
   const sourceFiltered =
@@ -877,10 +1062,7 @@ function groupOutgoing(records: PaymentRecord[]): Group[] {
 function groupTimestamp(g: Group): number {
   if (g.kind === "single") return g.record.timestamp;
   if (g.kind === "received") return g.tx.timestamp;
-  return g.records.reduce(
-    (max, r) => (r.timestamp > max ? r.timestamp : max),
-    0,
-  );
+  return g.records.reduce((max, r) => (r.timestamp > max ? r.timestamp : max), 0);
 }
 
 function matches(r: PaymentRecord, q: string): boolean {
@@ -891,12 +1073,40 @@ function matches(r: PaymentRecord, q: string): boolean {
   );
 }
 
-function matchesReceived(tx: ReceivedTransaction, q: string): boolean {
+function matchesReceived(tx: ReceivedUtxo, q: string): boolean {
+  const claimMeta = receivedClaimMeta(tx);
   return (
-    tx.recipient.toLowerCase().includes(q) ||
-    (tx.signature?.toLowerCase().includes(q) ?? false) ||
-    tx.commitment.toLowerCase().includes(q)
+    tx.destinationAddress.toLowerCase().includes(q) ||
+    tx.mint.toLowerCase().includes(q) ||
+    tx.symbol.toLowerCase().includes(q) ||
+    claimMeta.label.toLowerCase().includes(q)
   );
+}
+
+function receivedClaimMeta(tx: ReceivedUtxo): { label: string; className: string } {
+  switch (tx.claimState) {
+    case "processing":
+      return {
+        label: "Processing claim",
+        className: "text-sky-400/85",
+      };
+    case "withdrawal_queued":
+      return {
+        label: "Transfer queued",
+        className: "text-emerald-400/90",
+      };
+    case "transferred":
+      return {
+        label: "Transferred",
+        className: "text-emerald-400/90",
+      };
+    case "pending":
+    default:
+      return {
+        label: "Pending claim",
+        className: "text-amber-400/80",
+      };
+  }
 }
 
 function SingleRow({ tx, index }: { tx: PaymentRecord; index: number }) {
@@ -964,18 +1174,15 @@ function ReceivedRow({
   tx,
   index,
 }: {
-  tx: ReceivedTransaction;
+  tx: ReceivedUtxo;
   index: number;
 }) {
-  const recipientShort = `${tx.recipient.slice(0, 4)}…${tx.recipient.slice(-4)}`;
-  const sigShort = tx.signature
-    ? `${tx.signature.slice(0, 4)}…${tx.signature.slice(-4)}`
-    : null;
-  const decimals = tx.decimals ?? 9;
-  const symbol = tx.symbol ?? "";
-  const formattedNet = formatBaseUnits(String(tx.netAmount), decimals);
+  const recipientShort = `${tx.destinationAddress.slice(0, 4)}…${tx.destinationAddress.slice(-4)}`;
+  const decimals = tx.decimals;
+  const symbol = tx.symbol;
+  const formattedNet = formatBaseUnits(tx.amount, decimals);
   const dateLabel = formatDate(tx.timestamp);
-  const explorerUrl = tx.signature ? solscanTxUrl(tx.signature) : null;
+  const claimMeta = receivedClaimMeta(tx);
 
   return (
     <motion.li
@@ -997,16 +1204,11 @@ function ReceivedRow({
           <p className="truncate font-mono text-[13px] text-foreground">
             {recipientShort}
           </p>
-          {sigShort && (
-            <span className="hidden font-mono text-[10.5px] text-muted-foreground sm:inline">
-              {sigShort}
-            </span>
-          )}
         </div>
         <div className="mt-0.5 flex items-center gap-1.5 text-[12px] text-muted-foreground">
           <span>{dateLabel}</span>
           <DirChip direction="in" />
-          <TypeChip>{txTypeLabel(tx.txType)}</TypeChip>
+          <TypeChip>Received</TypeChip>
         </div>
       </div>
 
@@ -1016,20 +1218,10 @@ function ReceivedRow({
             +{formattedNet}{" "}
             <span className="text-muted-foreground">{symbol}</span>
           </p>
-          <p className="text-[11px] text-muted-foreground">Settled</p>
+          <p className={cn("text-[11px]", claimMeta.className)}>
+            {claimMeta.label}
+          </p>
         </div>
-        {explorerUrl && (
-          <a
-            href={explorerUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="text-muted-foreground transition-colors hover:text-primary"
-            aria-label="Open transaction on Solscan"
-            title="Open transaction on Solscan"
-          >
-            <HugeiconsIcon icon={EyeIcon} size={15} strokeWidth={1.8} />
-          </a>
-        )}
       </div>
     </motion.li>
   );
