@@ -17,16 +17,16 @@ const NAV: { heading: string; items: { label: string; href: string }[] }[] = [
       { label: "Pay", href: "/pay" },
       { label: "Payroll", href: "/payroll" },
       { label: "History", href: "/history" },
-      { label: "Compliance", href: "/compliance" },
+      { label: "Audit Access", href: "/compliance" },
     ],
   },
   {
     heading: "Build",
     items: [
-      { label: "Cloak SDK", href: "https://docs.cloak.ag" },
-      { label: "Protocol", href: "https://docs.cloak.ag/protocol" },
-      { label: "Relay API", href: "https://docs.cloak.ag/services" },
-      { label: "Status", href: "https://status.cloak.ag" },
+      { label: "Umbra SDK", href: "https://docs.umbraprivacy.com" },
+      { label: "Protocol", href: "https://docs.umbraprivacy.com/concepts/how-umbra-works" },
+      { label: "Quickstart", href: "https://docs.umbraprivacy.com/quickstart" },
+      { label: "SDK Reference", href: "https://docs.umbraprivacy.com/reference/client" },
     ],
   },
   {
@@ -135,13 +135,13 @@ export function SiteFooter() {
               GitHub
             </Link>
             <Link
-              href="https://docs.cloak.ag"
+              href="https://docs.umbraprivacy.com"
               className="transition-colors hover:text-primary"
             >
               Docs
             </Link>
             <span className="font-mono text-[11px] text-muted-foreground">
-              v0.1 · devnet
+              v0.1 · mainnet/devnet
             </span>
           </div>
         </div>
