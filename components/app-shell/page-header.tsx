@@ -67,7 +67,7 @@ export function PageHeader({
         )}
       </div>
 
-      {/* Gradient accent line — fades right, different from Nori's full border-b */}
+      {/* Gradient accent line — fades right to keep app headers light. */}
       <div className="mt-6 h-px bg-gradient-to-r from-primary/40 via-border/50 to-transparent" />
     </div>
   );
