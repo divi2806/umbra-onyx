@@ -178,7 +178,7 @@ const PRIMARY: PrimaryDef[] = [
     widget: <PayrollWidget />,
   },
   {
-    eyebrow: "03 · Compliance",
+    eyebrow: "03 · Audit Access",
     title: "Auditors see\nwhat you choose.",
     body: "Issue an audit access key tied to a date range. Your auditor gets a structured CSV report. The public ledger sees nothing.",
     icon: KeyIcon,
@@ -480,7 +480,7 @@ export function IntegrationsBento() {
         >
           <span className="flex items-center gap-2.5 text-white/50">
             <span className="size-2 rounded-full bg-primary shadow-[0_0_8px_oklch(0.68_0.24_285/0.8)]" />
-            Mainnet/devnet selectable
+            Devnet Umbra integration
           </span>
           <div className="hidden size-1 rounded-full bg-white/10 sm:block" />
           <span>Groth16 proofs · browser-side</span>

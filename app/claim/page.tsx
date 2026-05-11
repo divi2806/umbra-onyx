@@ -15,7 +15,6 @@ import { useSearchParams } from "next/navigation";
 import * as React from "react";
 
 import { ConnectButton } from "@/components/solana/connect-button";
-import { NetworkSwitcher } from "@/components/solana/network-switcher";
 import { OnyxMark } from "@/components/logos";
 import { FancyButton } from "@/components/ui/fancy-button";
 import { decodeClaimPayload } from "@/lib/umbra/invoice";
@@ -102,9 +101,6 @@ function ClaimPageInner() {
         </Link>
         <div className="h-5 w-px bg-border" />
         <span className="text-[13px] text-muted-foreground">Payment request</span>
-        <div className="ml-auto">
-          <NetworkSwitcher />
-        </div>
       </header>
 
       <main className="mx-auto max-w-md px-4 py-16">

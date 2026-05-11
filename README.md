@@ -61,24 +61,13 @@ Important Umbra implementation files:
 
 ---
 
-## Network Switching
-
-Users can switch between **Mainnet** and **Devnet** from the network selector in the app header. The selector stores the choice in local browser storage and reloads Onyx so the Solana wallet connection, RPC endpoint, Umbra client, indexer, relayer, token registry, and local records all use the selected network.
-
-The local override key is:
-
-```text
-onyx:solana-cluster:v1
-```
-
-Default network is `devnet` unless `NEXT_PUBLIC_SOLANA_CLUSTER` is set.
+## Network
 
 | Network | Solana cluster | Umbra program ID | Indexer | Relayer |
 |---|---|---|---|---|
-| Mainnet | `mainnet-beta` | `UMBRAD2ishebJTcgCLkTkNUx1v3GyoAgpTRPeWoLykh` | `https://utxo-indexer.api.umbraprivacy.com` | `https://relayer.api.umbraprivacy.com` |
 | Devnet | `devnet` | `DSuKkyqGVGgo4QtPABfxKJKygUDACbUhirnuv63mEpAJ` | `https://utxo-indexer.api-devnet.umbraprivacy.com` | `https://relayer.api-devnet.umbraprivacy.com` |
 
-Mainnet supports SOL/wSOL, USDC, USDT, and UMBRA through Umbra. Devnet currently supports SOL/wSOL only in this app.
+Onyx is currently devnet-only. It ignores `NEXT_PUBLIC_SOLANA_CLUSTER` and always boots on Solana devnet. Devnet currently supports SOL/wSOL only in this app.
 
 ---
 
@@ -126,21 +115,12 @@ pnpm install
 
 ### Environment
 
-Onyx runs on devnet by default. Create `.env.local` only when overriding defaults:
+Onyx runs on devnet. Create `.env.local` only when overriding the default devnet RPC:
 
 ```env
-# Default network if the user has not selected one in the app.
-NEXT_PUBLIC_SOLANA_CLUSTER=devnet
-
-# Optional generic RPC override for the default env-selected network.
+# Optional devnet RPC override.
 NEXT_PUBLIC_SOLANA_RPC_URL=https://api.devnet.solana.com
 NEXT_PUBLIC_SOLANA_WS_URL=wss://api.devnet.solana.com
-
-# Optional per-network RPC overrides used by the one-click selector.
-NEXT_PUBLIC_SOLANA_DEVNET_RPC_URL=https://api.devnet.solana.com
-NEXT_PUBLIC_SOLANA_DEVNET_WS_URL=wss://api.devnet.solana.com
-NEXT_PUBLIC_SOLANA_MAINNET_RPC_URL=https://your-mainnet-rpc.example
-NEXT_PUBLIC_SOLANA_MAINNET_WS_URL=wss://your-mainnet-rpc.example
 ```
 
 ### Run locally
@@ -159,12 +139,12 @@ pnpm lint
 pnpm test:faucet
 ```
 
-`pnpm test:faucet` is a devnet helper script for funding a test wallet. There is no broad automated test suite yet; most Umbra flows are currently verified manually with wallet interaction on devnet or mainnet.
+`pnpm test:faucet` is a devnet helper script for funding a test wallet. There is no broad automated test suite yet; most Umbra flows are currently verified manually with wallet interaction on devnet.
 
 ### Using the application
 
-1. Open Onyx and choose Mainnet or Devnet from the header network selector.
-2. First-time visitors see a walkthrough modal that explains private sends, network selection, Umbra registration, claiming, and audit access.
+1. Open Onyx on devnet.
+2. First-time visitors see a walkthrough modal that explains private sends, Umbra registration, claiming, and audit access.
 3. Connect a Solana wallet.
 4. Wait for Umbra registration to finish if this is the wallet's first use.
 5. Use `/pay` for a private transfer or `/payroll` for CSV batch payments.
@@ -181,7 +161,6 @@ Onyx currently uses Umbra's deployed Solana programs and does not ship an Onyx-o
 | Item | Value |
 |---|---|
 | Frontend | https://onyx-red.vercel.app/ |
-| Umbra mainnet program | `UMBRAD2ishebJTcgCLkTkNUx1v3GyoAgpTRPeWoLykh` |
 | Umbra devnet program | `DSuKkyqGVGgo4QtPABfxKJKygUDACbUhirnuv63mEpAJ` |
 
 ---

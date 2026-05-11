@@ -11,7 +11,6 @@ import Link from "next/link";
 import * as React from "react";
 
 import { OnyxMark } from "@/components/logos";
-import { NetworkSwitcher } from "@/components/solana/network-switcher";
 import { FancyButton } from "@/components/ui/fancy-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -79,10 +78,10 @@ export default function AuditPage() {
 
   const tokenDecoded = React.useMemo(() => decodeViewingKeyToken(token.trim()), [token]);
 
-  function handleScan() {
-    const parsed = decodeViewingKeyToken(token.trim());
+  function runAudit(rawToken: string) {
+    const parsed = decodeViewingKeyToken(rawToken.trim());
     if (!parsed) {
-      setError("Invalid token. Paste the base64 token issued from the Audit Access page.");
+      setError("Invalid token. Paste the audit access token issued from the Audit Access page.");
       return;
     }
 
@@ -134,6 +133,24 @@ export default function AuditPage() {
     }
   }
 
+  React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const rawToken =
+      params.get("t") ??
+      params.get("token") ??
+      params.get("key") ??
+      params.get("v");
+    if (!rawToken) return;
+    setToken(rawToken);
+    runAudit(rawToken);
+    // URL bootstrap should run once on page load.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function handleScan() {
+    runAudit(token);
+  }
+
   function handleDownload() {
     if (!csvData || !dateRange) return;
     const blob = new Blob([csvData], { type: "text/csv" });
@@ -157,9 +174,6 @@ export default function AuditPage() {
         </Link>
         <div className="h-5 w-px bg-border" />
         <span className="text-[13px] text-muted-foreground">Audit Portal</span>
-        <div className="ml-auto">
-          <NetworkSwitcher />
-        </div>
       </header>
 
       <main className="mx-auto max-w-3xl px-4 py-12 sm:px-8">
@@ -185,7 +199,7 @@ export default function AuditPage() {
             <Label htmlFor="vkToken">Audit access token</Label>
             <Input
               id="vkToken"
-              placeholder="Paste the base64 token here…"
+              placeholder="Paste the audit access token here…"
               value={token}
               onChange={(e) => setToken(e.target.value)}
               className="font-mono text-[12.5px]"
@@ -231,8 +245,8 @@ export default function AuditPage() {
           </FancyButton>
 
           <p className="text-[11.5px] text-muted-foreground">
-            Note: Current tokens include a scoped Umbra scan snapshot. Older tokens without a snapshot
-            can only be opened in the same browser that has the wallet holder&apos;s scan cache.
+            Current audit access tokens include a scoped Umbra scan snapshot, so auditors
+            can review them without connecting a wallet.
           </p>
         </div>
 

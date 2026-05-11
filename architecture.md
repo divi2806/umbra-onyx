@@ -56,7 +56,7 @@ components/
 ```text
 lib/
   solana/
-    config.ts           Cluster, RPC, WebSocket, one-click network override
+    config.ts           Devnet cluster, RPC, and WebSocket config
     providers.tsx       Wallet and connection providers
     explorer.ts         Explorer URL helpers
     rpc.ts              Solana Kit RPC clients
@@ -91,7 +91,6 @@ Onyx keeps state local to the user's browser.
 
 | State | Storage |
 |---|---|
-| Selected network | `localStorage` key `onyx:solana-cluster:v1` |
 | First-visit walkthrough | `localStorage` key `onyx:first-visit-walkthrough:v1` |
 | Outbound payments | local storage keyed by sender wallet and cluster |
 | Received UTXO scan cache | local storage keyed by receiver wallet and cluster |
@@ -99,25 +98,20 @@ Onyx keeps state local to the user's browser.
 | Audit access keys | local storage keyed by issuer wallet and cluster |
 | Team roster and schedules | local storage keyed by cluster |
 
-Because records are cluster-scoped, switching from Mainnet to Devnet changes the active local ledger, token set, and Umbra endpoints.
+Records are still keyed by cluster internally, but the app currently runs only on devnet.
 
-## Network Selection
+## Network
 
-`components/solana/network-switcher.tsx` renders the one-click selector. It supports:
+Onyx is devnet-only in the current product state.
 
-- Mainnet
-- Devnet
+`lib/solana/config.ts`:
 
-When the user selects a network:
+- hardcodes `cluster` to `devnet`
+- uses `NEXT_PUBLIC_SOLANA_DEVNET_RPC_URL` or `NEXT_PUBLIC_SOLANA_RPC_URL` as optional HTTP RPC overrides
+- uses `NEXT_PUBLIC_SOLANA_DEVNET_WS_URL` or `NEXT_PUBLIC_SOLANA_WS_URL` as optional WebSocket overrides
+- falls back to public Solana devnet endpoints
 
-1. Onyx writes the selected cluster to `localStorage`.
-2. The page reloads.
-3. `lib/solana/config.ts` reads the override.
-4. `SolanaProvider` uses the selected RPC endpoint.
-5. `UmbraClientProvider` builds a fresh Umbra client for that network.
-6. Storage helpers read/write under cluster-specific keys.
-
-This reload-based switch keeps the existing SDK clients and wallet providers from mixing network state.
+The previous one-click mainnet/devnet switcher was removed.
 
 ## Privacy And Trust Boundaries
 
@@ -186,7 +180,6 @@ Onyx currently relies on Umbra's deployed program IDs:
 
 | Network | Program ID |
 |---|---|
-| Mainnet | `UMBRAD2ishebJTcgCLkTkNUx1v3GyoAgpTRPeWoLykh` |
 | Devnet | `DSuKkyqGVGgo4QtPABfxKJKygUDACbUhirnuv63mEpAJ` |
 
 No Onyx-owned Solana program ID is currently deployed.
@@ -194,7 +187,6 @@ No Onyx-owned Solana program ID is currently deployed.
 ## Operational Notes
 
 - Devnet supports only SOL/wSOL in the current token registry.
-- Mainnet token support follows the Umbra supported-token list in `lib/umbra/tokens.ts`.
 - Fresh random Umbra generation indices are required for UTXO creation and claim flows.
 - Arcium MPC settlement can lag, so UI states must show queued/pending progress.
 - Lint and build are available, but this repository preference is not to run them unless explicitly requested.

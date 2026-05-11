@@ -141,7 +141,7 @@ export function SiteFooter() {
               Docs
             </Link>
             <span className="font-mono text-[11px] text-muted-foreground">
-              v0.1 · mainnet/devnet
+              v0.1 · devnet
             </span>
           </div>
         </div>

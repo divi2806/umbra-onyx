@@ -12,7 +12,6 @@ import {
   SolanaLogo,
 } from "@/components/logos";
 import { ConnectButton } from "@/components/solana/connect-button";
-import { NetworkSwitcher } from "@/components/solana/network-switcher";
 import { fancyButtonVariants } from "@/components/ui/fancy-button";
 
 function TopBar() {
@@ -31,7 +30,6 @@ function TopBar() {
       </nav>
 
       <div className="flex items-center gap-2">
-        <NetworkSwitcher />
         <ConnectButton />
       </div>
     </header>
@@ -137,7 +135,7 @@ function MockTransactionCard() {
       <div className="absolute -right-4 -top-3 rounded-xl border border-primary/25 bg-card/80 px-3 py-1.5 shadow-lg backdrop-blur-sm">
         <div className="flex items-center gap-1.5">
           <span className="size-1.5 animate-pulse rounded-full bg-primary" />
-          <span className="text-[10.5px] font-semibold text-primary">Solana mainnet/devnet</span>
+          <span className="text-[10.5px] font-semibold text-primary">Solana devnet</span>
         </div>
       </div>
 
@@ -208,7 +206,7 @@ export function Hero() {
           </h1>
 
           <p className="mt-6 max-w-[480px] text-[15.5px] leading-7 text-muted-foreground">
-            Move payroll, vendor payments, and treasury transfers through a ZK shielded pool on Solana. Your amounts stay sealed. Compliance stays audit-ready.
+            Move payroll, vendor payments, and treasury transfers through a ZK shielded pool on Solana. Your amounts stay sealed. Audit access stays ready.
           </p>
 
           <div className="mt-8 flex flex-wrap items-center gap-3">

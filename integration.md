@@ -28,14 +28,13 @@ The SDK reference for this repository is `llms.txt`.
 
 ## Network Mapping
 
-Onyx maps Solana clusters to Umbra networks in `lib/umbra/config.ts`.
+Onyx currently runs only on Solana devnet and maps that cluster to Umbra devnet in `lib/umbra/config.ts`.
 
 | Solana cluster | Umbra network | Indexer | Relayer |
 |---|---|---|---|
-| `mainnet-beta` | `mainnet` | `https://utxo-indexer.api.umbraprivacy.com` | `https://relayer.api.umbraprivacy.com` |
 | `devnet` | `devnet` | `https://utxo-indexer.api-devnet.umbraprivacy.com` | `https://relayer.api-devnet.umbraprivacy.com` |
 
-Users switch networks with the header selector. The selected cluster is saved in `localStorage` under `onyx:solana-cluster:v1`, then the app reloads so all SDK clients and local caches are rebuilt for that network.
+There is no in-app network switcher. `lib/solana/config.ts` always sets `cluster` to `devnet` and only accepts optional devnet RPC/WebSocket overrides.
 
 ## Wallet And Client Setup
 
@@ -121,7 +120,7 @@ Flow:
 Known operational behavior:
 
 - `NullifierAlreadyBurnt` means the UTXO was already processed.
-- Arcium MPC settlement can lag on devnet and mainnet.
+- Arcium MPC settlement can lag on devnet.
 - Local claim state is retained so stale scanner rows do not keep showing as unclaimed.
 
 ## Audit Access Key Flow
@@ -163,7 +162,6 @@ Security properties:
 
 | Network | Tokens in app |
 |---|---|
-| Mainnet | SOL/wSOL, USDC, USDT, UMBRA |
 | Devnet | SOL/wSOL |
 
 All amounts are converted to base units before Umbra SDK calls.
@@ -178,4 +176,3 @@ The integration intentionally keeps Umbra flows SDK-aligned and direct. Importan
 - nullifier-already-burnt skip behavior
 - encrypted balance polling timeouts
 - withdrawal queued state for Arcium MPC settlement
-

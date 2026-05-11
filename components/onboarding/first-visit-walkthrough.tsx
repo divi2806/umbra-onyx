@@ -35,8 +35,8 @@ const STEPS = [
   {
     icon: Wallet01Icon,
     eyebrow: "First setup",
-    title: "Pick a network, connect a wallet, then let Umbra register it.",
-    body: "Use the Mainnet/Devnet selector in the header. When you connect a wallet for the first time, Onyx prepares the Umbra encrypted account required to receive shielded payments.",
+    title: "Connect a devnet wallet, then let Umbra register it.",
+    body: "Onyx currently runs on Solana devnet. When you connect a wallet for the first time, Onyx prepares the Umbra encrypted account required to receive shielded payments.",
   },
   {
     icon: DollarSendIcon,
@@ -140,7 +140,7 @@ export function FirstVisitWalkthrough() {
 
           <div className="mt-6 grid gap-2 sm:grid-cols-2">
             {[
-              { label: "Mainnet or Devnet", value: "Selectable" },
+              { label: "Network", value: "Devnet" },
               { label: "Wallet custody", value: "Non-custodial" },
               { label: "Privacy layer", value: "Umbra SDK" },
               { label: "Audit review", value: "Read-only token" },

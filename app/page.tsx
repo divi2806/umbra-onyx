@@ -141,7 +141,7 @@ function FinalCta() {
               Stop running payroll on a public database.
             </h2>
             <p className="mt-4 max-w-md text-[14.5px] leading-7 text-muted-foreground">
-              Onyx supports Solana mainnet and devnet. Pick a network, connect your treasury wallet, and run your first private disbursement in under two minutes.
+              Onyx currently runs on Solana devnet. Connect your treasury wallet and run your first private disbursement in under two minutes.
             </p>
             <div className="mt-8 flex items-center gap-3">
               <Link
@@ -153,7 +153,7 @@ function FinalCta() {
               </Link>
             </div>
             <p className="mt-4 font-mono text-[11.5px] text-muted-foreground/60">
-              UMBRAD2i…Lykh mainnet · DSuKky…EpAJ devnet
+              DSuKky…EpAJ · devnet
             </p>
           </div>
 

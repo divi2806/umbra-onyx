@@ -18,6 +18,9 @@ export type ViewingKey = {
 };
 
 export type SharableToken = {
+  version?: 1;
+  type?: "onyx-audit-access";
+  auditor?: string;
   nk: string;
   from: string;
   to: string;
@@ -69,6 +72,28 @@ function newId(): string {
   return `vk_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
+function encodeBase64Url(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
+
+function decodeBase64Value(value: string): string {
+  const normalized = value.trim().replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized.padEnd(
+    normalized.length + ((4 - (normalized.length % 4)) % 4),
+    "=",
+  );
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
 export function addViewingKey(
   cluster: SolanaCluster,
   wallet: string,
@@ -94,9 +119,12 @@ export function revokeViewingKey(cluster: SolanaCluster, wallet: string, id: str
   persist(cluster, wallet, next);
 }
 
-/** Encodes a ViewingKey into a compact base64 token to share with the auditor. */
+/** Encodes a ViewingKey into a compact base64url token to share with the auditor. */
 export function encodeViewingKeyToken(vk: ViewingKey): string {
   const payload: SharableToken = {
+    version: 1,
+    type: "onyx-audit-access",
+    auditor: vk.auditor,
     nk: vk.nkHex,
     from: vk.dateFrom,
     to: vk.dateTo,
@@ -105,13 +133,13 @@ export function encodeViewingKeyToken(vk: ViewingKey): string {
     utxos: vk.utxos ?? [],
     issuedAt: vk.createdAt,
   };
-  return btoa(JSON.stringify(payload));
+  return encodeBase64Url(JSON.stringify(payload));
 }
 
-/** Decodes a base64 token produced by encodeViewingKeyToken. Returns null if malformed. */
+/** Decodes a token produced by encodeViewingKeyToken. Returns null if malformed. */
 export function decodeViewingKeyToken(token: string): SharableToken | null {
   try {
-    const payload = JSON.parse(atob(token)) as unknown;
+    const payload = JSON.parse(decodeBase64Value(token)) as unknown;
     if (
       payload &&
       typeof payload === "object" &&
@@ -122,7 +150,9 @@ export function decodeViewingKeyToken(token: string): SharableToken | null {
       typeof (payload as Record<string, unknown>).nk === "string" &&
       typeof (payload as Record<string, unknown>).from === "string" &&
       typeof (payload as Record<string, unknown>).to === "string" &&
-      typeof (payload as Record<string, unknown>).wallet === "string"
+      typeof (payload as Record<string, unknown>).wallet === "string" &&
+      ((payload as Record<string, unknown>).type === undefined ||
+        (payload as Record<string, unknown>).type === "onyx-audit-access")
     ) {
       return payload as SharableToken;
     }

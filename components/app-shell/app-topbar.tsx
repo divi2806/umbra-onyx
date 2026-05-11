@@ -4,8 +4,8 @@ import { motion } from "motion/react";
 import { usePathname } from "next/navigation";
 import * as React from "react";
 
+import { ClusterBadge } from "@/components/solana/cluster-badge";
 import { ConnectButton } from "@/components/solana/connect-button";
-import { NetworkSwitcher } from "@/components/solana/network-switcher";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 
 const TITLES: Record<string, { title: string; subtitle: string }> = {
@@ -65,7 +65,7 @@ export function AppTopbar() {
         </motion.div>
       </div>
 
-      <NetworkSwitcher />
+      <ClusterBadge />
       <ConnectButton />
     </header>
   );

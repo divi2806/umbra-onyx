@@ -179,6 +179,9 @@ export default function CompliancePage() {
 
   const activeKeys = viewingKeys.filter((k) => !k.revoked);
   const revokedKeys = viewingKeys.filter((k) => k.revoked);
+  const lastAuditHref = lastToken
+    ? `/audit?t=${encodeURIComponent(lastToken)}`
+    : null;
 
   return (
     <div className="mx-auto w-full max-w-screen-xl px-5">
@@ -323,15 +326,25 @@ export default function CompliancePage() {
                 </button>
               </div>
               <p className="text-[11px] text-muted-foreground">
-                Auditors paste this at{" "}
-                <a
-                  href="/audit"
-                  className="text-primary underline-offset-2 hover:underline"
-                >
-                  /audit
-                </a>{" "}
-                to view the date-bounded snapshot. Use Export CSV below to generate the same scoped report.
+                Auditors paste this at /audit, or open the prefilled review link.
               </p>
+              {lastAuditHref && (
+                <div className="flex flex-wrap gap-2 pt-1">
+                  <a
+                    href={lastAuditHref}
+                    className="inline-flex h-9 items-center justify-center rounded-xl border border-primary/30 bg-primary/10 px-3 text-[12.5px] font-medium text-primary transition-colors hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                  >
+                    Open audit review
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(`${window.location.origin}${lastAuditHref}`, "new-link")}
+                    className="inline-flex h-9 items-center justify-center rounded-xl border border-border bg-background/45 px-3 text-[12.5px] font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                  >
+                    {copied === "new-link" ? "Link copied" : "Copy review link"}
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
@@ -416,6 +429,14 @@ export default function CompliancePage() {
 
                       {/* Actions */}
                       <div className="flex shrink-0 gap-1.5">
+                        <a
+                          href={`/audit?t=${encodeURIComponent(token)}`}
+                          aria-label="Open audit review"
+                          title="Open audit review"
+                          className="text-muted-foreground transition-colors hover:text-primary"
+                        >
+                          <HugeiconsIcon icon={ArrowRight01Icon} size={13} strokeWidth={1.8} />
+                        </a>
                         <button
                           type="button"
                           aria-label="Copy token"
