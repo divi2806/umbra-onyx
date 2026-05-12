@@ -28,6 +28,15 @@ import {
 import { getShieldTokens } from "./tokens";
 import type { ReceivedUtxoClaimState } from "./scanned-history";
 
+export type ClaimAndWithdrawOptions = {
+  /**
+   * Optional ledger UTXO ids (`treeIndex:insertionIndex`) to claim.
+   * When provided, receiver-claimable UTXOs outside this set are ignored so
+   * already-processed local rows do not poison a fresh claim batch.
+   */
+  receiverUtxoIds?: readonly string[];
+};
+
 export type ClaimOutcome = {
   receivedState?: ReceivedUtxoClaimState;
 };
@@ -43,7 +52,7 @@ export type ClaimStatus =
   | "error";
 
 export type UseClaimUtxos = {
-  claimAndWithdraw: () => Promise<ClaimOutcome>;
+  claimAndWithdraw: (options?: ClaimAndWithdrawOptions) => Promise<ClaimOutcome>;
   status: ClaimStatus;
   progress: string | null;
   error: Error | null;
@@ -180,11 +189,15 @@ type ClaimableCollections = {
 async function scanAllClaimableUtxos(
   scanner: ClaimableScanner,
   onProgress: (message: string) => void,
+  options?: ClaimAndWithdrawOptions,
 ): Promise<ClaimableCollections> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const selfBurnable: any[] = [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const receiverClaimable: any[] = [];
+  const receiverIdSet = options?.receiverUtxoIds
+    ? new Set(options.receiverUtxoIds)
+    : null;
 
   for (let treeIdx = 0; treeIdx < TREES_TO_SCAN; treeIdx++) {
     onProgress(
@@ -198,13 +211,33 @@ async function scanAllClaimableUtxos(
     );
 
     if (result.selfBurnable?.length) selfBurnable.push(...result.selfBurnable);
-    if (result.received?.length) receiverClaimable.push(...result.received);
-    if (result.publicReceived?.length) {
-      receiverClaimable.push(...result.publicReceived);
+
+    const received = [
+      ...(result.received ?? []),
+      ...(result.publicReceived ?? []),
+    ];
+    for (const utxo of received) {
+      const id = scannedClaimableUtxoId(treeIdx, utxo);
+      if (!receiverIdSet || (id && receiverIdSet.has(id))) {
+        receiverClaimable.push(utxo);
+      }
     }
   }
 
   return { selfBurnable, receiverClaimable };
+}
+
+function scannedClaimableUtxoId(treeIndex: number, utxo: unknown): string | null {
+  if (!utxo || typeof utxo !== "object") return null;
+  const insertionIndex = (utxo as Record<string, unknown>).insertionIndex;
+  if (
+    typeof insertionIndex !== "bigint" &&
+    typeof insertionIndex !== "number" &&
+    typeof insertionIndex !== "string"
+  ) {
+    return null;
+  }
+  return `${treeIndex}:${String(insertionIndex)}`;
 }
 
 type ClaimBatchLike = {
@@ -335,7 +368,9 @@ export function useClaimUtxos(): UseClaimUtxos {
 
   const inflightRef = React.useRef<Promise<ClaimOutcome> | null>(null);
 
-  const claimAndWithdraw = React.useCallback(async (): Promise<ClaimOutcome> => {
+  const claimAndWithdraw = React.useCallback(async (
+    options?: ClaimAndWithdrawOptions,
+  ): Promise<ClaimOutcome> => {
     if (inflightRef.current) return inflightRef.current;
 
     const run = (async () => {
@@ -355,7 +390,7 @@ export function useClaimUtxos(): UseClaimUtxos {
 
         const scanner = getClaimableUtxoScannerFunction({ client });
         let { selfBurnable: allSelfBurnable, receiverClaimable: allReceiverClaimable } =
-          await scanAllClaimableUtxos(scanner, setProgress);
+          await scanAllClaimableUtxos(scanner, setProgress, options);
 
         const totalUtxos = allSelfBurnable.length + allReceiverClaimable.length;
         let skipClaimBecauseAlreadySpent = false;
@@ -416,7 +451,7 @@ export function useClaimUtxos(): UseClaimUtxos {
                       staleRetries++;
                       setProgress(`Merkle proof stale — re-fetching and retrying (attempt ${staleRetries}/${MAX_STALE_PROOF_RETRIES})…`);
                       console.warn("[umbra] self-claim: stale Merkle proof — re-fetching", selfErr.message);
-                      const fresh = await scanAllClaimableUtxos(scanner, setProgress);
+                      const fresh = await scanAllClaimableUtxos(scanner, setProgress, options);
                       allSelfBurnable = fresh.selfBurnable;
                       if (allSelfBurnable.length === 0) {
                         setProgress("No fresh self-claimable UTXOs found after re-scan.");
@@ -513,7 +548,7 @@ export function useClaimUtxos(): UseClaimUtxos {
                       staleRetries++;
                       setProgress(`Merkle proof stale — re-fetching and retrying (attempt ${staleRetries}/${MAX_STALE_PROOF_RETRIES})…`);
                       console.warn("[umbra] receiver-claim: stale Merkle proof — re-fetching", recErr.message);
-                      const fresh = await scanAllClaimableUtxos(scanner, setProgress);
+                      const fresh = await scanAllClaimableUtxos(scanner, setProgress, options);
                       allReceiverClaimable = fresh.receiverClaimable;
                       if (allReceiverClaimable.length === 0) {
                         setProgress("No fresh received UTXOs found after re-scan.");
@@ -736,8 +771,8 @@ export function useClaimUtxos(): UseClaimUtxos {
 
           if (withdrawQueued > 0 && withdrawErrors.length === 0) {
             hints.push(
-              `Withdrawal queued for Arcium MPC — your ${withdrawQueued > 1 ? `${withdrawQueued} token withdrawals have` : "token withdrawal has"} been submitted. ` +
-                `Funds will arrive in your wallet once Arcium processes the computation (usually a few minutes). ` +
+              `Claimed — your ${withdrawQueued > 1 ? `${withdrawQueued} wallet withdrawals have` : "wallet withdrawal has"} been submitted. ` +
+                `Funds arrive once Arcium processes the computation; on devnet this can take a few minutes. ` +
                 `You can close this tab safely.`,
             );
           }

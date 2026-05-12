@@ -175,6 +175,16 @@ export default function HistoryPage() {
     || claimStatus === "claiming"
     || claimStatus === "querying"
     || claimStatus === "withdrawing";
+  const pendingReceived = React.useMemo(
+    () => received.filter((tx) => !tx.claimState || tx.claimState === "pending"),
+    [received],
+  );
+  const hasReceivedSettlementToCheck = React.useMemo(
+    () => received.some(
+      (tx) => tx.claimState === "processing" || tx.claimState === "withdrawal_queued",
+    ),
+    [received],
+  );
 
   const handleSync = React.useCallback(() => {
     runScan().catch(() => {
@@ -189,14 +199,43 @@ export default function HistoryPage() {
   }, [resetScan]);
 
   const handleClaim = React.useCallback(() => {
-    const targetReceivedIds = received.map(receivedUtxoKey);
-    claimAndWithdraw()
+    const targetReceivedIds = pendingReceived.map(receivedUtxoKey);
+    const targetIdSet = new Set(targetReceivedIds);
+    const previousClaimStateIds = received.reduce(
+      (acc, tx) => {
+        if (
+          tx.claimState &&
+          tx.claimState !== "pending" &&
+          !targetIdSet.has(receivedUtxoKey(tx))
+        ) {
+          acc[tx.claimState].push(receivedUtxoKey(tx));
+        }
+        return acc;
+      },
+      {
+        processing: [] as string[],
+        withdrawal_queued: [] as string[],
+        transferred: [] as string[],
+      },
+    );
+    claimAndWithdraw({ receiverUtxoIds: targetReceivedIds })
       .then(async (outcome) => {
         // Full refresh so spent nullifiers disappear from the local cache.
         try {
           await resetScan();
         } finally {
-          if (sender && outcome.receivedState && targetReceivedIds.length > 0) {
+          if (!sender) return;
+          for (const [claimState, ids] of Object.entries(previousClaimStateIds)) {
+            if (ids.length > 0) {
+              markReceivedUtxosClaimState(
+                sender,
+                solanaConfig.cluster,
+                ids,
+                claimState as Exclude<ReceivedUtxo["claimState"], undefined | "pending">,
+              );
+            }
+          }
+          if (outcome.receivedState && targetReceivedIds.length > 0) {
             markReceivedUtxosClaimState(
               sender,
               solanaConfig.cluster,
@@ -209,7 +248,7 @@ export default function HistoryPage() {
       .catch(() => {
         // Error already surfaced via claimError state.
       });
-  }, [claimAndWithdraw, received, resetScan, sender]);
+  }, [claimAndWithdraw, pendingReceived, received, resetScan, sender]);
 
   const clearDateRange = React.useCallback(() => {
     setPage(0);
@@ -310,22 +349,22 @@ export default function HistoryPage() {
                   type="button"
                   variant={claimStatus === "success" ? "outline" : "default"}
                   size="default"
-                  onClick={
-                    claimStatus === "success" || claimStatus === "error"
-                      ? resetClaim
-                      : handleClaim
-                  }
+                  onClick={handleClaim}
                   disabled={isClaimBusy || !clientReady || !sender}
-                  title="Claim all received UTXOs and withdraw to your wallet"
+                  title={
+                    pendingReceived.length > 0
+                      ? `Claim ${pendingReceived.length} pending received UTXO${pendingReceived.length !== 1 ? "s" : ""} and withdraw to your wallet`
+                      : hasReceivedSettlementToCheck
+                        ? "Check Umbra encrypted balance and retry withdrawal"
+                        : "Check for claimable Umbra funds"
+                  }
                   className="shrink-0"
                 >
                   <HugeiconsIcon
                     icon={
                       isClaimBusy
                         ? Loading03Icon
-                        : claimStatus === "success"
-                          ? Tick01Icon
-                          : WalletAdd02Icon
+                        : WalletAdd02Icon
                     }
                     size={14}
                     strokeWidth={1.8}
@@ -335,10 +374,12 @@ export default function HistoryPage() {
                     {isClaimBusy
                       ? "Claiming…"
                       : claimStatus === "success"
-                        ? "Claimed"
+                        ? "Check again"
                         : claimStatus === "error"
                           ? "Retry"
-                          : "Claim"}
+                          : pendingReceived.length > 0
+                            ? "Claim"
+                            : "Check funds"}
                   </span>
                 </Button>
               )}
@@ -1092,7 +1133,7 @@ function receivedClaimMeta(tx: ReceivedUtxo): { label: string; className: string
       };
     case "withdrawal_queued":
       return {
-        label: "Transfer queued",
+        label: "Claimed",
         className: "text-emerald-400/90",
       };
     case "transferred":

@@ -2,7 +2,6 @@ import * as React from "react";
 
 import { AppSidebar } from "@/components/app-shell/app-sidebar";
 import { PageTransition } from "@/components/app-shell/page-transition";
-import { ClusterBadge } from "@/components/solana/cluster-badge";
 import { ConnectButton } from "@/components/solana/connect-button";
 
 export default function AppLayout({
@@ -28,7 +27,6 @@ export default function AppLayout({
       <main className="relative min-h-screen flex-1 overflow-x-hidden pl-[216px]">
         {/* Top right header for wallet */}
         <div className="absolute top-6 right-8 z-50 flex items-center gap-3">
-          <ClusterBadge />
           <ConnectButton />
         </div>
 

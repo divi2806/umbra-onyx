@@ -6,7 +6,6 @@ import { usePathname } from "next/navigation";
 import * as React from "react";
 
 import { OnyxMark } from "@/components/logos";
-import { ClusterBadge } from "@/components/solana/cluster-badge";
 import { ConnectButton } from "@/components/solana/connect-button";
 import { cn } from "@/lib/utils";
 
@@ -88,7 +87,6 @@ export function AppTopNav() {
 
         {/* Right */}
         <div className="ml-auto flex items-center gap-2.5">
-          <ClusterBadge />
           <ConnectButton />
         </div>
       </div>
