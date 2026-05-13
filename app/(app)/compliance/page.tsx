@@ -198,14 +198,14 @@ export default function CompliancePage() {
         <div className="mt-4 h-px bg-gradient-to-r from-primary/40 via-border/50 to-transparent" />
       </div>
 
-      <div className="grid gap-6 pb-16 lg:grid-cols-[1fr_360px] lg:items-start">
+      <div className="grid min-w-0 gap-6 pb-16 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
 
         {/* ── Issue new key ─────────────────────────────────── */}
         <motion.section
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
-          className="flex flex-col gap-6 rounded-xl border border-border/60 bg-card/40 p-6 sm:p-8"
+          className="min-w-0 flex flex-col gap-6 rounded-xl border border-border/60 bg-card/40 p-6 sm:p-8"
         >
           <div className="flex items-start gap-3">
             <div className="grid size-10 shrink-0 place-items-center rounded-xl border border-primary/20 bg-primary/10 text-primary">
@@ -303,19 +303,20 @@ export default function CompliancePage() {
 
           {/* Token output */}
           {lastToken && (
-            <div className="flex flex-col gap-2 rounded-xl border border-primary/30 bg-primary/5 p-4">
+            <div className="min-w-0 flex flex-col gap-2 rounded-xl border border-primary/30 bg-primary/5 p-4">
               <p className="text-[12px] font-medium text-primary">
                 Audit access key ready — share this token with your auditor:
               </p>
-              <div className="flex items-center gap-2">
-                <code className="min-w-0 flex-1 truncate rounded-md bg-background/60 px-2 py-1.5 font-mono text-[11px] text-foreground/80">
+              <div className="relative min-w-0 rounded-lg border border-border/60 bg-background/60 p-3 pr-14">
+                <code className="block max-h-28 overflow-y-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-5 text-foreground/80">
                   {lastToken}
                 </code>
                 <button
                   type="button"
                   onClick={() => handleCopy(lastToken, "new")}
                   aria-label="Copy token"
-                  className="shrink-0 text-muted-foreground transition-colors hover:text-primary"
+                  title="Copy token"
+                  className="absolute right-2 top-2 inline-flex size-10 items-center justify-center rounded-lg border border-border/70 bg-background/85 text-muted-foreground transition-colors hover:border-primary/30 hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                 >
                   <HugeiconsIcon
                     icon={copied === "new" ? CheckmarkCircle01Icon : Copy01Icon}
