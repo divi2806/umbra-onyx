@@ -80,14 +80,21 @@ function buildPollingForwarder(rpcUrl: string): ITransactionForwarder {
 
     console.log("[umbra-forwarder] sending transaction (skipPreflight=true)...");
     let sig: string;
-    try {
-      sig = (await rpc
+    const sendWire = async (isRebroadcast = false): Promise<string> => {
+      if (isRebroadcast) {
+        console.log("[umbra-forwarder] rebroadcasting transaction...");
+      }
+      return (await rpc
         .sendTransaction(wire, {
           encoding: "base64",
           skipPreflight: true,
           maxRetries: BigInt(3),
         })
         .send()) as string;
+    };
+
+    try {
+      sig = await sendWire();
     } catch (sendErr) {
       console.error("[umbra-forwarder] sendTransaction RPC call failed:", sendErr);
       throw sendErr;
@@ -101,13 +108,40 @@ function buildPollingForwarder(rpcUrl: string): ITransactionForwarder {
     const POLL_MS = 2_000;
     const deadline = Date.now() + 10 * 60 * 1000;
     const started = Date.now();
+    let lastRebroadcastAt = started;
     let pollCount = 0;
     while (Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, POLL_MS));
       pollCount++;
+      const elapsed = Date.now() - started;
+
+      // `sendTransaction` returning a signature only means the RPC accepted the
+      // packet. Public devnet RPCs sometimes drop or fail to forward packets,
+      // leaving `getSignatureStatuses` null forever. Re-broadcast the same
+      // signed wire transaction for the first ~90s while the blockhash is
+      // likely still valid. Duplicate broadcasts are safe: the signature is the
+      // transaction id, so a landed tx will simply start returning a status.
+      if (elapsed < 90_000 && Date.now() - lastRebroadcastAt >= 6_000) {
+        lastRebroadcastAt = Date.now();
+        try {
+          const rebroadcastSig = await sendWire(true);
+          if (rebroadcastSig !== sig) {
+            console.warn(
+              "[umbra-forwarder] rebroadcast returned a different signature",
+              { original: sig, rebroadcast: rebroadcastSig },
+            );
+          }
+        } catch (rebroadcastErr) {
+          console.warn(
+            "[umbra-forwarder] rebroadcast failed (will keep polling):",
+            rebroadcastErr,
+          );
+        }
+      }
+
       // After ~30s, search full history — devnet RPCs often drop recent-only hints.
-      const searchHistory = Date.now() - started > 30_000;
-      console.log(`[umbra-forwarder] poll #${pollCount} sig=${sig.slice(0, 8)}… elapsed=${Date.now() - started}ms searchHistory=${searchHistory}`);
+      const searchHistory = elapsed > 30_000;
+      console.log(`[umbra-forwarder] poll #${pollCount} sig=${sig.slice(0, 8)}… elapsed=${elapsed}ms searchHistory=${searchHistory}`);
       let resp;
       try {
         resp = await rpc

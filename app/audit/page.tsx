@@ -141,10 +141,11 @@ export default function AuditPage() {
       params.get("key") ??
       params.get("v");
     if (!rawToken) return;
-    setToken(rawToken);
-    runAudit(rawToken);
+    queueMicrotask(() => {
+      setToken(rawToken);
+      runAudit(rawToken);
+    });
     // URL bootstrap should run once on page load.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function handleScan() {
