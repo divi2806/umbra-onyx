@@ -1,16 +1,15 @@
 "use client";
 
+import { getUmbraClient } from "@umbra-privacy/sdk";
+import { getATAIntoReceiverBurnableStealthPoolNoteCreatorFunction } from "@umbra-privacy/sdk/deposit";
 import {
-  getPublicBalanceToReceiverClaimableUtxoCreatorFunction,
-  getUmbraClient,
-} from "@umbra-privacy/sdk";
-import {
-  getCreateReceiverClaimableUtxoFromPublicBalanceProver,
+  getDefaultZkProverDeps,
+  getATAIntoStealthPoolNoteCreatorProver,
   type ZkAssetData,
   type ZkAssetLoadResult,
   type ZkAssetStorageContext,
   type ZkAssetStoreResult,
-} from "@umbra-privacy/web-zk-prover";
+} from "@umbra-privacy/sdk/zk-prover";
 import type { Address } from "@solana/kit";
 import type { U64 } from "@umbra-privacy/sdk/types";
 
@@ -106,7 +105,8 @@ const zkAssetStorer = async (
 // Asset downloads are amortised by the cache above.
 // ---------------------------------------------------------------------------
 function buildZkProver(t0: number, onProgress?: (msg: string) => void) {
-  return getCreateReceiverClaimableUtxoFromPublicBalanceProver({
+  return getATAIntoStealthPoolNoteCreatorProver({
+    ...getDefaultZkProverDeps(),
     load: zkAssetLoader,
     store: zkAssetStorer,
     callbacks: {
@@ -202,18 +202,18 @@ export async function umbraSendOnce(
   const zkProver = buildZkProver(t0, onProgress);
   console.log("[umbra-send] ZK prover built, creating UTXO function...");
 
-  const createUtxo = getPublicBalanceToReceiverClaimableUtxoCreatorFunction(
+  const createUtxo = getATAIntoReceiverBurnableStealthPoolNoteCreatorFunction(
     { client },
     {
       zkProver,
       hooks: {
-        createUtxo: {
-          pre: async () => {
+        createStealthPoolNote: {
+          onPreSend: async () => {
             console.log(`[umbra-send] ✔ proof phase complete (${Date.now() - t0}ms) — wallet signing now`);
             onPhase?.("submit");
             onProgress?.("Signing and submitting Umbra UTXO transaction…");
           },
-          post: async () => {
+          onPostSend: async () => {
             console.log(`[umbra-send] ✔ UTXO transaction confirmed (${Date.now() - t0}ms)`);
             onProgress?.("Umbra UTXO transaction confirmed.");
           },
@@ -282,14 +282,14 @@ export async function umbraSendOnce(
   }
 
   console.log(`[umbra-send] ✔ success (${Date.now() - t0}ms)`, {
-    createProofAccountSignature: result.createProofAccountSignature,
+    createProofAccountSignature: result.populateProofAccountSignature,
     createUtxoSignature: result.createUtxoSignature,
   });
 
   onPhase?.("success");
 
   return {
-    createProofAccountSignature: result.createProofAccountSignature,
+    createProofAccountSignature: result.populateProofAccountSignature,
     createUtxoSignature: result.createUtxoSignature,
   };
 }

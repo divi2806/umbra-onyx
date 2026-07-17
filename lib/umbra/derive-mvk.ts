@@ -1,6 +1,7 @@
 "use client";
 
-import { getMasterViewingKeyDeriver, getUmbraClient } from "@umbra-privacy/sdk";
+import { getUmbraClient } from "@umbra-privacy/sdk";
+import { getMasterViewingKeyDeriver } from "@umbra-privacy/sdk/crypto/key-derivation";
 
 type IUmbraClient = Awaited<ReturnType<typeof getUmbraClient>>;
 

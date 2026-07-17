@@ -1,24 +1,22 @@
 "use client";
 
+import { getUmbraRelayer } from "@umbra-privacy/sdk";
 import {
-  getClaimableUtxoScannerFunction,
-  getEncryptedBalanceQuerierFunction,
-  getEncryptedBalanceToPublicBalanceDirectWithdrawerFunction,
-  getReceiverClaimableUtxoToEncryptedBalanceClaimerFunction,
-  getSelfClaimableUtxoToPublicBalanceClaimerFunction,
-  getUmbraRelayer,
-} from "@umbra-privacy/sdk";
+  getBurnableStealthPoolNoteScannerFunction,
+  getReceiverBurnableStealthPoolNoteIntoETABurnerFunction,
+  getSelfBurnableStealthPoolNoteIntoATABurnerFunction,
+} from "@umbra-privacy/sdk/burn";
+import { getEncryptedBalanceQuerierFunction } from "@umbra-privacy/sdk/query";
+import { getETAIntoATAWithdrawerFunction } from "@umbra-privacy/sdk/withdrawal";
 import { isClaimUtxoError, isEncryptedWithdrawalError } from "@umbra-privacy/sdk/errors";
 import type { Address } from "@solana/kit";
-import type { U32 } from "@umbra-privacy/sdk/types";
 import {
   getClaimReceiverClaimableUtxoIntoEncryptedBalanceProver,
   getClaimSelfClaimableUtxoIntoPublicBalanceProver,
-} from "@umbra-privacy/web-zk-prover";
+} from "@umbra-privacy/sdk/zk-prover";
 import { useWallet } from "@solana/wallet-adapter-react";
 import * as React from "react";
 
-import { solanaConfig } from "@/lib/solana/config";
 import { umbraConfig } from "./config";
 import {
   ensureUmbraFullRegistration,
@@ -63,8 +61,6 @@ export type UseClaimUtxos = {
   reset: () => void;
 };
 
-const TREES_TO_SCAN = solanaConfig.cluster === "mainnet-beta" ? 4 : 1;
-
 // Devnet Arcium MPC can take several minutes. Give it up to 10 min before giving up.
 const CLAIM_TIMEOUT_MS = 10 * 60 * 1000;
 // Poll relayer every 5 s to avoid hammering the endpoint.
@@ -78,16 +74,16 @@ const BALANCE_QUERY_TIMEOUT_MS = 12_000;
 const MAX_STALE_PROOF_RETRIES = 2;
 
 type ReceiverClaimDeps = NonNullable<
-  Parameters<typeof getReceiverClaimableUtxoToEncryptedBalanceClaimerFunction>[1]
+  Parameters<typeof getReceiverBurnableStealthPoolNoteIntoETABurnerFunction>[1]
 >;
 type SelfPublicClaimDeps = NonNullable<
-  Parameters<typeof getSelfClaimableUtxoToPublicBalanceClaimerFunction>[1]
+  Parameters<typeof getSelfBurnableStealthPoolNoteIntoATABurnerFunction>[1]
 >;
 type WithdrawDeps = NonNullable<
-  Parameters<typeof getEncryptedBalanceToPublicBalanceDirectWithdrawerFunction>[1]
+  Parameters<typeof getETAIntoATAWithdrawerFunction>[1]
 >;
 type WithdrawAmount = Parameters<
-  ReturnType<typeof getEncryptedBalanceToPublicBalanceDirectWithdrawerFunction>
+  ReturnType<typeof getETAIntoATAWithdrawerFunction>
 >[2];
 type EncryptedBalanceMap = Map<string, { state: string; balance?: bigint }>;
 
@@ -178,7 +174,7 @@ function claimProgressMessage(event: { status?: string; requestId?: string }): s
   }
 }
 
-type ClaimableScanner = ReturnType<typeof getClaimableUtxoScannerFunction>;
+type ClaimableScanner = ReturnType<typeof getBurnableStealthPoolNoteScannerFunction>;
 type ClaimableCollections = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   selfBurnable: any[];
@@ -199,30 +195,25 @@ async function scanAllClaimableUtxos(
     ? new Set(options.receiverUtxoIds)
     : null;
 
-  for (let treeIdx = 0; treeIdx < TREES_TO_SCAN; treeIdx++) {
-    onProgress(
-      TREES_TO_SCAN > 1
-        ? `Scanning tree ${treeIdx + 1} of ${TREES_TO_SCAN}…`
-        : "Scanning for unclaimed UTXOs…",
-    );
-    const result = await scanner(
-      BigInt(treeIdx) as unknown as U32,
-      0n as unknown as U32,
-    );
+  onProgress("Scanning for unclaimed UTXOs…");
+  const result = await scanner();
+  selfBurnable.push(
+    ...result.etaToStealthPoolSelfBurnable,
+    ...result.ataToStealthPoolSelfBurnable,
+    ...result.networkBalanceToStealthPoolSelfBurnableWithEncryptedAddress,
+  );
 
-    if (result.selfBurnable?.length) selfBurnable.push(...result.selfBurnable);
-
-    const received = [
-      ...(result.received ?? []),
-      ...(result.publicReceived ?? []),
-    ];
+  const received = [
+    ...result.etaToStealthPoolReceiverBurnable,
+    ...result.ataToStealthPoolReceiverBurnable,
+    ...result.networkBalanceToStealthPoolReceiverBurnableWithEncryptedAddress,
+  ];
     for (const utxo of received) {
-      const id = scannedClaimableUtxoId(treeIdx, utxo);
+      const id = scannedClaimableUtxoId(Number(utxo.treeIndex), utxo);
       if (!receiverIdSet || (id && receiverIdSet.has(id))) {
         receiverClaimable.push(utxo);
       }
     }
-  }
 
   return { selfBurnable, receiverClaimable };
 }
@@ -247,6 +238,7 @@ type ClaimBatchLike = {
   readonly callbackSignature?: string;
   readonly failureReason?: string | null;
   readonly utxoIds?: readonly string[];
+  readonly stealthPoolNoteIds?: readonly string[];
 };
 
 type ClaimResultStats = {
@@ -301,10 +293,12 @@ function summarizeClaimResult(
   let pendingUtxos = 0;
   let failedUtxos = 0;
   const failureMessages: string[] = [];
-  const hasExplicitUtxoIds = batches.some((batch) => Array.isArray(batch.utxoIds));
+  const hasExplicitUtxoIds = batches.some(
+    (batch) => Array.isArray(batch.stealthPoolNoteIds) || Array.isArray(batch.utxoIds),
+  );
 
   for (const batch of batches) {
-    const count = batch.utxoIds?.length ?? 1;
+    const count = batch.stealthPoolNoteIds?.length ?? batch.utxoIds?.length ?? 1;
     const status = batch.status ?? "submitted";
     if (status === "completed") {
       completedUtxos += count;
@@ -345,8 +339,8 @@ function onlyNullifierAlreadyBurnt(messages: string[]): boolean {
  * Full recipient claim flow per the Umbra SDK docs:
  *
  * 1. Scan mixer trees for all claimable UTXOs (selfBurnable + received + publicReceived).
- * 2. Claim self-burnable UTXOs → public wallet via getSelfClaimableUtxoToPublicBalanceClaimerFunction.
- * 3. Claim receiver-claimable UTXOs → encrypted balance via getReceiverClaimableUtxoToEncryptedBalanceClaimerFunction.
+ * 2. Burn self-burnable notes into the public wallet.
+ * 3. Burn receiver-burnable notes into the encrypted token account.
  * 4. Poll encrypted balance until Arcium MPC settles.
  * 5. Withdraw each settled encrypted token balance → public wallet.
  *
@@ -388,7 +382,7 @@ export function useClaimUtxos(): UseClaimUtxos {
         await ensureUmbraFullRegistration(client, { onProgress: setProgress });
         setProgress("Scanning for unclaimed UTXOs…");
 
-        const scanner = getClaimableUtxoScannerFunction({ client });
+        const scanner = getBurnableStealthPoolNoteScannerFunction({ client });
         let { selfBurnable: allSelfBurnable, receiverClaimable: allReceiverClaimable } =
           await scanAllClaimableUtxos(scanner, setProgress, options);
 
@@ -411,16 +405,20 @@ export function useClaimUtxos(): UseClaimUtxos {
           const selfClaimDeps = {
             fetchBatchMerkleProof: getBatchMerkleProofFetcher(client),
             zkProver: selfProver,
-            relayer: selfRelayer,
+            relayer: {
+              submitBurn: selfRelayer.submitClaim,
+              pollBurnStatus: selfRelayer.pollClaimStatus,
+              getRelayerAddress: selfRelayer.getRelayerAddress,
+            },
             awaitCompletion: true,
             timeoutMs: CLAIM_TIMEOUT_MS,
             pollingIntervalMs: CLAIM_POLL_INTERVAL_MS,
-            onProgress: (event: { status?: string; requestId?: string }) => {
+            onProgress: async (event: { status?: string; requestId?: string }) => {
               setProgress(claimProgressMessage(event));
             },
-          } as unknown as SelfPublicClaimDeps;
+          } satisfies SelfPublicClaimDeps;
 
-          const selfClaim = getSelfClaimableUtxoToPublicBalanceClaimerFunction(
+          const selfClaim = getSelfBurnableStealthPoolNoteIntoATABurnerFunction(
             { client, generationIndex: randomUmbraGenerationIndex() },
             selfClaimDeps,
           );
@@ -506,16 +504,20 @@ export function useClaimUtxos(): UseClaimUtxos {
           const receiverClaimDeps = {
             fetchBatchMerkleProof: getBatchMerkleProofFetcher(client),
             zkProver: receiverProver,
-            relayer: receiverRelayer,
+            relayer: {
+              submitBurn: receiverRelayer.submitClaim,
+              pollBurnStatus: receiverRelayer.pollClaimStatus,
+              getRelayerAddress: receiverRelayer.getRelayerAddress,
+            },
             awaitCompletion: true,
             timeoutMs: CLAIM_TIMEOUT_MS,
             pollingIntervalMs: CLAIM_POLL_INTERVAL_MS,
-            onProgress: (event: { status?: string; requestId?: string }) => {
+            onProgress: async (event: { status?: string; requestId?: string }) => {
               setProgress(claimProgressMessage(event));
             },
-          } as unknown as ReceiverClaimDeps;
+          } satisfies ReceiverClaimDeps;
 
-          const receiverClaim = getReceiverClaimableUtxoToEncryptedBalanceClaimerFunction(
+          const receiverClaim = getReceiverBurnableStealthPoolNoteIntoETABurnerFunction(
             { client, generationIndex: randomUmbraGenerationIndex() },
             receiverClaimDeps,
           );
@@ -718,7 +720,7 @@ export function useClaimUtxos(): UseClaimUtxos {
               awaitComputationFinalization: false,
             },
           } as unknown as WithdrawDeps;
-          const withdrawer = getEncryptedBalanceToPublicBalanceDirectWithdrawerFunction(
+          const withdrawer = getETAIntoATAWithdrawerFunction(
             { client },
             withdrawDeps,
           );

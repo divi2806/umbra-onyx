@@ -1,7 +1,6 @@
 "use client";
 
-import { getClaimableUtxoScannerFunction } from "@umbra-privacy/sdk";
-import type { U32 } from "@umbra-privacy/sdk/types";
+import { getBurnableStealthPoolNoteScannerFunction } from "@umbra-privacy/sdk/burn";
 import { useWallet } from "@solana/wallet-adapter-react";
 import * as React from "react";
 
@@ -34,10 +33,6 @@ export type UseScannedHistory = {
   /** Drop the persisted cache and re-scan from tree head. */
   reset: () => Promise<StoredScan | null>;
 };
-
-// Number of Merkle trees to scan. Umbra has one tree per supported token.
-// Scanning an empty or non-existent tree is a cheap no-op from the indexer side.
-const TREES_TO_SCAN = solanaConfig.cluster === "mainnet-beta" ? 4 : 1;
 
 const STALE_AFTER_MS = 5 * 60 * 1000;
 
@@ -113,31 +108,30 @@ export function useScannedHistory(): UseScannedHistory {
 
     const run = (async () => {
       try {
-        const scanner = getClaimableUtxoScannerFunction({ client });
+        const scanner = getBurnableStealthPoolNoteScannerFunction({ client });
 
         const freshUtxos: ReceivedUtxo[] = [];
         const nextIndexByTree: Record<string, number> = {};
 
-        for (let treeIdx = 0; treeIdx < TREES_TO_SCAN; treeIdx++) {
-          const startIndex = prevReport?.nextScanStartIndexByTree[String(treeIdx)] ?? 0;
-          setProgress(`Scanning tree ${treeIdx + 1} of ${TREES_TO_SCAN}`);
+        const result = await scanner();
+        for (const tree of result.scannedTrees) {
+          nextIndexByTree[String(tree.treeIndex)] = Number(tree.totalLeaves);
+        }
 
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const result = await scanner(BigInt(treeIdx) as any as U32, BigInt(startIndex) as any as U32);
+        const allReceived = [
+          ...result.etaToStealthPoolReceiverBurnable,
+          ...result.ataToStealthPoolReceiverBurnable,
+          ...result.networkBalanceToStealthPoolReceiverBurnableWithEncryptedAddress,
+        ];
 
-          nextIndexByTree[String(treeIdx)] = Number(result.nextScanStartIndex);
-
-          // Combine encrypted-balance received and public-balance received UTXOs.
-          const allReceived = [...result.received, ...result.publicReceived];
-
-          for (const utxo of allReceived) {
+        for (const utxo of allReceived) {
             const mint = mintFromLowHigh(
               BigInt(utxo.h1Components.mintAddressLow),
               BigInt(utxo.h1Components.mintAddressHigh),
             );
             const token = getShieldTokenByMint(mint);
             freshUtxos.push({
-              treeIndex: treeIdx,
+              treeIndex: Number(utxo.treeIndex),
               insertionIndex: Number(utxo.insertionIndex),
               amount: String(utxo.amount),
               mint,
@@ -146,7 +140,6 @@ export function useScannedHistory(): UseScannedHistory {
               destinationAddress: utxo.destinationAddress,
               timestamp: timestampComponentsToMs(utxo.h1Components.timestamp),
             });
-          }
         }
 
         const freshReport = {

@@ -3,10 +3,10 @@
 import {
   getPollingComputationMonitor,
   getUmbraClient,
-  getUserAccountQuerierFunction,
-  getUserRegistrationFunction,
 } from "@umbra-privacy/sdk";
-import { getUserRegistrationProver } from "@umbra-privacy/web-zk-prover";
+import { getUserAccountQuerierFunction } from "@umbra-privacy/sdk/query";
+import { getUserRegistrationFunction } from "@umbra-privacy/sdk/registration";
+import { getUserRegistrationProver } from "@umbra-privacy/sdk/zk-prover";
 import {
   createSolanaRpc,
   getBase64EncodedWireTransaction,
@@ -35,9 +35,8 @@ import { createUmbraSigner } from "./signer";
 //   - Public WebSocket endpoints are rate-limited and frequently drop
 //     subscriptions mid-flight, causing spurious confirmation timeouts.
 //
-// This forwarder replaces both with:
-//   - skipPreflight: true  → let the on-chain program be the source of truth.
-//   - HTTP polling         → reliable confirmation without a persistent WS.
+// This forwarder validates the exact signed wire transaction, broadcasts it,
+// then confirms over HTTP polling without relying on a persistent WebSocket.
 // ---------------------------------------------------------------------------
 
 type ITransactionForwarder = {
@@ -78,7 +77,37 @@ function buildPollingForwarder(rpcUrl: string): ITransactionForwarder {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const wire = getBase64EncodedWireTransaction(tx as any);
 
-    console.log("[umbra-forwarder] sending transaction (skipPreflight=true)...");
+    console.log("[umbra-forwarder] simulating signed transaction...");
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const simulation = await (rpc as any)
+        .simulateTransaction(wire, {
+          encoding: "base64",
+          sigVerify: false,
+          commitment: "confirmed",
+        })
+        .send();
+      if (simulation.value.err) {
+        const logs: string[] = simulation.value.logs ?? [];
+        console.error("[umbra-forwarder] transaction simulation failed");
+        console.error("[umbra-forwarder] err:", safeStringify(simulation.value.err));
+        if (logs.length) {
+          console.error("[umbra-forwarder] program logs:\n" + logs.join("\n"));
+        }
+        const detail = [...logs]
+          .reverse()
+          .find((line) => line.includes("Error:") || line.includes("error:"));
+        throw new Error(
+          `Transaction simulation failed: ${detail ?? safeStringify(simulation.value.err)}`,
+        );
+      }
+      console.log("[umbra-forwarder] simulation passed");
+    } catch (simulationError) {
+      console.error("[umbra-forwarder] simulation RPC call failed:", simulationError);
+      throw simulationError;
+    }
+
+    console.log("[umbra-forwarder] sending transaction...");
     let sig: string;
     const sendWire = async (isRebroadcast = false): Promise<string> => {
       if (isRebroadcast) {
@@ -376,33 +405,33 @@ export function ensureUmbraFullRegistration(
       await register({
         confidential: true,
         anonymous: true,
-        callbacks: {
-          userAccountInitialisation: {
-            pre: async () => {
+        hooks: {
+          initUserAccount: {
+            onPreSend: async () => {
               console.log("[umbra-reg] userAccountInitialisation: pre");
               options.onProgress?.("Creating Umbra encrypted account…");
             },
-            post: async () => {
+            onPostSend: async () => {
               console.log("[umbra-reg] userAccountInitialisation: post ✔");
               options.onProgress?.("Umbra encrypted account ready.");
             },
           },
           registerX25519PublicKey: {
-            pre: async () => {
+            onPreSend: async () => {
               console.log("[umbra-reg] registerX25519PublicKey: pre");
               options.onProgress?.("Registering Umbra encryption key…");
             },
-            post: async () => {
+            onPostSend: async () => {
               console.log("[umbra-reg] registerX25519PublicKey: post ✔");
               options.onProgress?.("Umbra encryption key ready.");
             },
           },
-          registerUserForAnonymousUsage: {
-            pre: async () => {
+          registerAnonymousUsage: {
+            onPreSend: async () => {
               console.log("[umbra-reg] registerUserForAnonymousUsage: pre");
               options.onProgress?.("Registering Umbra anonymous commitment…");
             },
-            post: async () => {
+            onPostSend: async () => {
               console.log("[umbra-reg] registerUserForAnonymousUsage: post ✔");
               options.onProgress?.("Umbra anonymous commitment ready.");
             },

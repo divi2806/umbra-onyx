@@ -38,16 +38,16 @@ Onyx solves this by giving teams a non-custodial payment workflow where funds mo
 
 ## How Onyx Uses The Umbra SDK
 
-Onyx uses `@umbra-privacy/sdk` and `@umbra-privacy/web-zk-prover` as the privacy layer. The app does not deploy a custom payment program; it composes Umbra's deployed Solana programs, indexer, relayer, registration, scanner, prover, UTXO, claim, and withdrawal APIs.
+Onyx uses `@umbra-privacy/sdk@5.0.0-rc.6` as the privacy layer, including the bundled browser ZK provers. The app does not deploy a custom payment program; it composes Umbra's deployed Solana programs, indexer, relayer, registration, scanner, prover, Stealth Pool Note, burn, and withdrawal APIs.
 
 | Umbra SDK capability | Onyx usage |
 |---|---|
 | `getUmbraClient` | Creates a wallet-bound Umbra client with RPC, WebSocket, indexer, transaction forwarder, and computation monitor configuration. |
 | `getUserRegistrationFunction` | Performs one-time confidential and anonymous registration so wallets can receive shielded UTXOs. |
-| `getPublicBalanceToReceiverClaimableUtxoCreatorFunction` | Sends public wallet funds into a receiver-claimable Umbra UTXO for private payments. |
-| `getClaimableUtxoScannerFunction` | Scans Umbra Merkle trees for UTXOs the connected wallet can claim. |
-| `getReceiverClaimableUtxoToEncryptedBalanceClaimerFunction` | Claims receiver UTXOs into Umbra encrypted balance through the Umbra relayer. |
-| `getEncryptedBalanceToPublicBalanceDirectWithdrawerFunction` | Withdraws encrypted balance back to the receiver's public wallet. |
+| `getATAIntoReceiverBurnableStealthPoolNoteCreatorFunction` | Sends public wallet funds into a receiver-burnable Stealth Pool Note. |
+| `getBurnableStealthPoolNoteScannerFunction` | Scans Umbra trees for notes the connected wallet can burn. |
+| `getReceiverBurnableStealthPoolNoteIntoETABurnerFunction` | Burns receiver notes into an Umbra Encrypted Token Account through the relayer. |
+| `getETAIntoATAWithdrawerFunction` | Withdraws encrypted balance back to the receiver's public wallet. |
 | Umbra viewing key derivation | Powers Onyx audit access keys, which are date-scoped read-only tokens for auditors. |
 
 Important Umbra implementation files:
@@ -160,7 +160,7 @@ Onyx currently uses Umbra's deployed Solana programs and does not ship an Onyx-o
 
 | Item | Value |
 |---|---|
-| Frontend | https://onyx-red.vercel.app/ |
+| Frontend | https://umbra-onyx.vercel.app/ |
 | Umbra devnet program | `DSuKkyqGVGgo4QtPABfxKJKygUDACbUhirnuv63mEpAJ` |
 
 ---
@@ -172,7 +172,6 @@ Onyx currently uses Umbra's deployed Solana programs and does not ship an Onyx-o
 - Tailwind CSS 4 and local UI components
 - `@solana/web3.js`, `@solana/kit`, and wallet adapter packages
 - `@umbra-privacy/sdk`
-- `@umbra-privacy/web-zk-prover`
 - Framer Motion via `motion/react`
 - Hugeicons
 

@@ -19,8 +19,7 @@ No Onyx server custodies funds or private keys.
 
 ```json
 {
-  "@umbra-privacy/sdk": "^3.0.0",
-  "@umbra-privacy/web-zk-prover": "^2.0.1"
+  "@umbra-privacy/sdk": "5.0.0-rc.6"
 }
 ```
 
@@ -73,8 +72,8 @@ Flow:
 2. Onyx ensures sender Umbra registration.
 3. Onyx verifies the receiver is Umbra-ready.
 4. Onyx converts amount to base units.
-5. Onyx calls `getPublicBalanceToReceiverClaimableUtxoCreatorFunction`.
-6. Browser prover `getCreateReceiverClaimableUtxoFromPublicBalanceProver` generates the ZK proof.
+5. Onyx calls `getATAIntoReceiverBurnableStealthPoolNoteCreatorFunction`.
+6. Bundled prover `getATAIntoStealthPoolNoteCreatorProver` generates the ZK proof.
 7. Onyx passes a fresh random generation index to avoid duplicate offset errors.
 8. Successful transaction metadata is stored locally for the sender history.
 
@@ -108,13 +107,13 @@ Primary files:
 
 Flow:
 
-1. Receiver opens History and scans for UTXOs with `getClaimableUtxoScannerFunction`.
-2. Onyx includes both `received` and `publicReceived` results.
+1. Receiver opens History and scans with `getBurnableStealthPoolNoteScannerFunction`.
+2. Onyx includes the receiver-burnable ETA, ATA, and encrypted-address result buckets.
 3. Matching rows are saved in local storage by wallet and cluster.
-4. Claim uses `getReceiverClaimableUtxoToEncryptedBalanceClaimerFunction`.
+4. Claim uses `getReceiverBurnableStealthPoolNoteIntoETABurnerFunction`.
 5. Claim dependencies include ZK prover, relayer, Merkle proof fetcher, and fresh random generation index.
 6. Claimed funds land in Umbra encrypted balance.
-7. Withdraw uses `getEncryptedBalanceToPublicBalanceDirectWithdrawerFunction`.
+7. Withdraw uses `getETAIntoATAWithdrawerFunction`.
 8. Arcium callback completion can lag, so Onyx shows queued and pending settlement states instead of blocking indefinitely.
 
 Known operational behavior:

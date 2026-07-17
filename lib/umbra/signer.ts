@@ -1,6 +1,6 @@
 "use client";
 
-import type { GetUmbraClientArgs } from "@umbra-privacy/sdk";
+import type { GetUmbraClientArgs } from "@umbra-privacy/sdk/client";
 import {
   type Address,
   type Transaction,
